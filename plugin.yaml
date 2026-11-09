@@ -1,0 +1,101 @@
+name: grok-bot-twin
+label: Grok Bot Twin
+version: "0.1.0"
+description: >-
+  Try Hermes without leaving Grok. Switch when your twin is ready. Keeps a bot from the Grok desktop app
+  and its Hermes twin profile in step through the botport CLI: name and description changes reach the twin
+  in seconds; instructions stay on the by-hand list; skills can travel through your own Mirror bot routine;
+  the rest is an honest by-hand checklist, with
+  conflicts, restore points and suspected secrets held back (a check, not a guarantee). Unofficial; not
+  affiliated with xAI. Disclosure: runs the external botport CLI (installed by you from an attested
+  release; never downloaded or bundled; its GitHub build attestation must pass at setup, with
+  hermes twin setup --allow-unattested as a loud, recorded opt-out for local builds) as a subprocess with an argument list, plus gh (attestation check) and hermes
+  (cron resume on "Ready to switch"), each path-checked; botport reads the Grok desktop app's bot list
+  (id, name, description) and the selected bots' local transcript files (capped, parsed only for
+  routine-change events), never login or credential files; writes only under plugin-data/grok-bot-twin/ in the Hermes root (and botport
+  writes the twin profiles it manages); one background thread checks file metadata every
+  sync_interval_seconds (default 60) while Hermes runs; the plugin itself makes no network calls; no
+  telemetry (the optional activity digest, off by default per twin, goes to your own Grok bot, which runs on
+  xAI's service); no account credentials; botport stores one local pair key per twin (owner-only file)
+  that signs its snapshots and, with the Mirror bot link on, authenticates packs (a copy then lives in that
+  Mirror bot's chat), rotated with hermes twin mirror --rotate-key and deleted by hermes twin remove.
+author: Josh Hudson
+license: MIT
+homepage: https://github.com/hudsonwa/grok-bot-twin
+manifest_version: 2
+requires_hermes: ">=0.22.7"
+platforms: [macos, linux]
+tags: [grok, twin, migration, import, sync, desktop]
+provides_tools:
+  - twin_status
+  - twin_recent
+provides_hooks:
+  - pre_llm_call
+  - on_session_start
+  - on_session_end
+capabilities: []
+requires_env: []
+emits: [synced, secrets_withheld, conflict, changed]
+external_dependencies:
+  - name: botport
+    install: "Download release tag v0.2.0 from https://github.com/hudsonwa/botport/releases, verify it with: gh attestation verify botport-<target>.tar.gz --repo hudsonwa/botport --signer-workflow hudsonwa/botport/.github/workflows/release.yml --source-ref refs/tags/v0.2.0, then run: hermes twin setup"
+    check: "botport version --json"
+    optional: true
+    note: "Without botport only the built-in demo works (hermes twin demo)."
+config_schema:
+  sync_interval_seconds:
+    type: int
+    default: 60
+    min: 5
+    label: Check interval (seconds)
+    description: How often the background thread checks the Grok app cache for changes (file metadata only). Minimum 5.
+  bots:
+    type: list
+    default: []
+    label: Bots to list
+    description: Name globs (for example "Acme*"). Only matching Grok bots are listed for twinning; empty lists all. Nothing is twinned until you pick it.
+  botport_path:
+    type: str
+    default: ""
+    label: botport path
+    description: Absolute path to the botport binary when it is not on PATH.
+  botport_release_tag:
+    type: str
+    default: ""
+    label: botport release tag
+    description: The botport release tag (like v0.2.0) whose GitHub build attestation hermes twin setup requires (gh attestation verify --source-ref refs/tags/<tag>). Empty uses the release this plugin version expects (v0.2.0). Anything not shaped like v1.2.3 is refused.
+  grok_app_dir:
+    type: str
+    default: ""
+    label: Grok app folder
+    description: Override the Grok desktop app folder (default is the app's standard location).
+  grok_account:
+    type: str
+    default: ""
+    label: Grok account label
+    description: Only needed when the Grok app on this computer holds more than one account. The 8-character label botport lists for your account (an opaque label, never the account itself).
+  inject_context:
+    type: bool
+    default: true
+    label: Tell the model it is a twin
+    description: Adds a short, data-only note (your Grok twin, an opaque id and its state) to each turn in a twinned profile.
+  digest_to_grok:
+    type: bool
+    default: false
+    label: Allow an activity digest to Grok
+    description: Lets you turn on, per twin, a digest of counts and times sent with "Send to Grok". Each twin still starts off.
+  digest_titles:
+    type: bool
+    default: false
+    label: Include short titles in the digest
+    description: Separate opt-in. Titles are capped and masked; never message content.
+  share_names_with_model:
+    type: bool
+    default: false
+    label: Share names with the model
+    description: Lets the twin_status and twin_recent tool results name the bot, its routines, skills and connectors (plain characters only). Off, they say "your Grok twin" and an opaque id. The per-turn note never carries names.
+  demo_profile:
+    type: str
+    default: ""
+    label: Demo profile
+    description: Hermes profile the demo twin is shown in (default is the current profile).

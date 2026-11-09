@@ -1,0 +1,9 @@
+{
+  "name": "grok-bot-twin",
+  "label": "Grok Bot Twin",
+  "description": "Backend for the Twins page in Hermes Desktop (no web dashboard tab).",
+  "icon": "Copy",
+  "version": "0.1.0",
+  "api": "plugin_api.py",
+  "tab": { "path": "/grok-bot-twin", "hidden": true }
+}
