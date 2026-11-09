@@ -562,15 +562,15 @@ if (!haveReact) {
     ok(kh && kg && kh.variant === kg.variant && kh.variant === 'outline', `keep buttons have equal weight (${kh?.variant} / ${kg?.variant})`)
   }
   // while the conflicts query (re)loads, or only an older empty answer exists, a neutral line;
-  // "Already settled" only from a fetch made after the card appeared.
+  // "Already settled" never shows: an empty answer keeps the neutral line (and the query keeps asking).
   for (const [q, want, label] of [
     [{ data: { conflicts: [] }, isFetching: true, dataUpdatedAt: Date.now() + 60_000 }, 'Loading both copies…', 'refetching'],
     [{ data: { conflicts: [] }, isFetching: false, dataUpdatedAt: 1 }, 'Loading both copies…', 'stale empty answer'],
-    [{ data: { conflicts: [] }, isFetching: false, dataUpdatedAt: Date.now() + 60_000 }, 'Already settled', 'fresh empty answer']
+    [{ data: { conflicts: [] }, isFetching: false, dataUpdatedAt: Date.now() + 60_000 }, 'Loading both copies…', 'fresh empty answer']
   ]) {
     H.override.conflicts = q
     const h = text(render(jsx(P.ConflictCard, { pair: acme })))
-    ok(h.includes(want) && (want === 'Already settled' || !h.includes('Already settled')), `pick-one card ${label}: ${want}`)
+    ok(h.includes(want) && !h.includes('Already settled'), `pick-one card ${label}: ${want}`)
   }
   H.override = {}
   render(jsx(P.ConflictItem, { pairId: 'acme-helper', conflict: both }))

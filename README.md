@@ -25,6 +25,8 @@ skills travel through an optional Mirror bot you run; routines and connectors ar
 Unofficial; not affiliated with xAI. Real twins need [botport](https://github.com/hudsonwa/botport) (MIT), a
 separate command-line tool by the same author that you install yourself; the demo does not need it.
 
+![Pick one in the demo: both copies side by side, Keep Grok, back in step with a restore point](docs/screenshots/demo.gif)
+
 | Pick one when both sides changed | Ready to switch |
 |---|---|
 | ![Conflict card: Hermes and Grok copies side by side](docs/screenshots/conflict-card.png) | ![Ready to switch checklist](docs/screenshots/ready-to-switch.png) |

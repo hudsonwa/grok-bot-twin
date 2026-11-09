@@ -1018,7 +1018,10 @@ function ConflictCard({ pair }) {
   const q = useQuery({
     queryFn: () => api(pairPath(pair.pair_id, 'conflicts')),
     queryKey: [ID, 'conflicts', pair.pair_id, pair.conflicts],
-    // an earlier answer for the same key may be "none": always ask again when the card appears
+    // an earlier answer for the same key may be "none": always ask again when the card appears, and keep asking
+    // while the answer is empty (the conflict may be a moment ahead of this route; the status refresh removes the
+    // card when the conflict really is gone)
+    refetchInterval: query => (Array.isArray(query?.state?.data?.conflicts) && query.state.data.conflicts.length === 0 ? 1_500 : false),
     refetchOnMount: 'always'
   })
 
@@ -1049,7 +1052,7 @@ function ConflictCard({ pair }) {
       : q.isError
         ? jsx(InlineError, { error: q.error, onRetry: () => void q.refetch() })
         : conflicts.length === 0
-          ? el('p', { className: 'text-[0.75rem] text-(--ui-text-tertiary)', role: 'status' }, settled ? 'Already settled. Refreshing…' : 'Loading both copies…')
+          ? el('p', { className: 'text-[0.75rem] text-(--ui-text-tertiary)', role: 'status' }, 'Loading both copies…')
           : conflicts.map((c, i) =>
               el(
                 'div',
