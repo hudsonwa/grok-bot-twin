@@ -77,7 +77,7 @@ INSTALL_HINT = (f"Install botport {EXPECTED_BOTPORT_TAG} from its GitHub release
                 "<path> --repo hudsonwa/botport --signer-workflow hudsonwa/botport/.github/workflows/release.yml "
                 f"--source-ref refs/tags/{EXPECTED_BOTPORT_TAG}`, then run `hermes twin setup`. Or try the demo: "
                 "`hermes twin demo`.")
-TRUST_HINT = "Check and trust botport again: `hermes twin setup` (it verifies the GitHub build attestation)."
+TRUST_HINT = "Check and trust botport (again after an update): `hermes twin setup` (it verifies the GitHub build attestation)."
 UNATTESTED_TEXT = "botport trusted WITHOUT attestation (local build)"
 
 # Features this plugin cannot work without (check these, not the version string).
