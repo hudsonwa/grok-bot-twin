@@ -38,7 +38,7 @@ requires_env: []
 emits: [synced, secrets_withheld, conflict, changed]
 external_dependencies:
   - name: botport
-    install: "Download release tag v0.2.0 from https://github.com/hudsonwa/botport/releases, verify it with: gh attestation verify botport-<target>.tar.gz --repo hudsonwa/botport --signer-workflow hudsonwa/botport/.github/workflows/release.yml --source-ref refs/tags/v0.2.0, then run: hermes twin setup"
+    install: "Download release tag v0.2.1 from https://github.com/hudsonwa/botport/releases, verify it with: gh attestation verify botport-<target>.tar.gz --repo hudsonwa/botport --signer-workflow hudsonwa/botport/.github/workflows/release.yml --source-ref refs/tags/v0.2.1, then run: hermes twin setup"
     check: "botport version --json"
     optional: true
     note: "Without botport only the built-in demo works (hermes twin demo)."
@@ -63,7 +63,7 @@ config_schema:
     type: str
     default: ""
     label: botport release tag
-    description: The botport release tag (like v0.2.0) whose GitHub build attestation hermes twin setup requires (gh attestation verify --source-ref refs/tags/<tag>). Empty uses the release this plugin version expects (v0.2.0). Anything not shaped like v1.2.3 is refused.
+    description: The botport release tag (like v0.2.0) whose GitHub build attestation hermes twin setup requires (gh attestation verify --source-ref refs/tags/<tag>). Empty uses the release this plugin version expects (v0.2.1). Anything not shaped like v1.2.3 is refused.
   grok_app_dir:
     type: str
     default: ""

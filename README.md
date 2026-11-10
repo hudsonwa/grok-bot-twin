@@ -121,12 +121,12 @@ The demo works without it. For your real Grok bots, install botport from a pinne
 build attestation before you trust it (needs the [GitHub CLI](https://cli.github.com/), signed in with `gh auth login`):
 
 ```sh
-# 1. Download release tag v0.2.0 for your platform
-TAG=v0.2.0 T=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+# 1. Download release tag v0.2.1 for your platform
+TAG=v0.2.1 T=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
 gh release download "$TAG" --repo hudsonwa/botport --pattern "botport-$T.tar.gz"
 # 2. Verify it was built from that tag by botport's own release workflow
 gh attestation verify "botport-$T.tar.gz" --repo hudsonwa/botport \
-  --signer-workflow hudsonwa/botport/.github/workflows/release.yml --source-ref refs/tags/v0.2.0
+  --signer-workflow hudsonwa/botport/.github/workflows/release.yml --source-ref refs/tags/v0.2.1
 # 3. Unpack, put botport on your PATH (or set botport_path in the plugin settings)
 tar -xzf "botport-$T.tar.gz" && mkdir -p ~/.local/bin && cp "botport-$T/botport" ~/.local/bin/
 # 4. Let the plugin check and trust it (it runs gh attestation verify on the binary itself; this must pass)
@@ -144,7 +144,7 @@ botport. For a botport you built yourself there is a loud opt-out, `hermes twin 
 commands the plugin runs are resolved to their real paths and get the same owner/permission check; doctor
 shows both paths.
 
-`hermes twin setup` pins the release it verifies (`--source-ref refs/tags/v0.2.0`); to trust another release set
+`hermes twin setup` pins the release it verifies (`--source-ref refs/tags/v0.2.1`); to trust another release set
 `botport_release_tag` or run `hermes twin setup --tag vX.Y.Z`. The plugin also refuses to run if any folder from
 the Hermes root down to its data folder is a symlink, owned by someone else or writable by others. The model sees a
 twin only as an opaque id (`t-` plus a keyed hash with a random per-install secret), never by name unless you turn
@@ -182,7 +182,7 @@ Desktop, Settings, Plugins, Grok Bot Twin (or `plugins.entries.grok-bot-twin.set
 | `sync_interval_seconds` | 60 (min 5) | how often the background thread checks the Grok cache (file metadata only) |
 | `bots` | `[]` | name globs of bots to list for twinning; nothing is twinned until you pick it |
 | `botport_path` | `""` | botport binary when not on PATH |
-| `botport_release_tag` | `""` (uses v0.2.0) | the botport release tag `hermes twin setup` verifies the attestation against; empty means the release this plugin version expects, v0.2.0 |
+| `botport_release_tag` | `""` (uses v0.2.1) | the botport release tag `hermes twin setup` verifies the attestation against; empty means the release this plugin version expects, v0.2.1 |
 | `grok_app_dir` | `""` | override the Grok app folder |
 | `grok_account` | `""` | only when the Grok app holds more than one account: the 8-character label botport lists for yours (an opaque label, never the account) |
 | `inject_context` | `true` | the short per-turn note in a twinned profile |

@@ -74,13 +74,13 @@ def test_setup_pins_expected_tag_and_records_it(bp, home):
     argv = _gh_calls(bp.log)[-1]
     assert argv[:2] == ["attestation", "verify"]
     assert argv[3:] == ["--repo", "hudsonwa/botport", "--signer-workflow",
-                        "hudsonwa/botport/.github/workflows/release.yml", "--source-ref", "refs/tags/v0.2.0"]
-    assert E.EXPECTED_BOTPORT_TAG == "v0.2.0"
-    assert res["attested"] and res["release_tag"] == "v0.2.0"
+                        "hudsonwa/botport/.github/workflows/release.yml", "--source-ref", "refs/tags/v0.2.1"]
+    assert E.EXPECTED_BOTPORT_TAG == "v0.2.1"
+    assert res["attested"] and res["release_tag"] == "v0.2.1"
     rec = _record(home)
-    assert rec["release_tag"] == "v0.2.0" and rec["attestation"]["tag"] == "v0.2.0"
+    assert rec["release_tag"] == "v0.2.1" and rec["attestation"]["tag"] == "v0.2.1"
     att = [c for c in bp.svc.doctor()["checks"] if c["id"] == "botport_attestation"][0]
-    assert att["ok"] and "release v0.2.0" in att["message"]
+    assert att["ok"] and "release v0.2.1" in att["message"]
 
 
 def test_setup_tag_from_config_and_re_attests_on_a_new_tag(bp, home):

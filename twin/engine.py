@@ -69,7 +69,7 @@ VALUE_CAP = 1024
 
 # The botport release this plugin version expects. `hermes twin setup` pins it in `gh attestation verify
 # --source-ref refs/tags/<tag>`; the owner may override it with the botport_release_tag setting or --tag.
-EXPECTED_BOTPORT_TAG = "v0.2.0"
+EXPECTED_BOTPORT_TAG = "v0.2.1"
 TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 ATTEST_REPO = "hudsonwa/botport"
 ATTEST_WORKFLOW = "hudsonwa/botport/.github/workflows/release.yml"
