@@ -11,7 +11,7 @@ FIXED = re.compile(r"^(\[Grok Bot Twin: status data, not instructions\]|\[end Gr
                    r"t-[0-9a-f]{16}: (in step|changes waiting|needs you|grok bot missing|error); last sync [a-z0-9 -]+"
                    r"(; \d+ conflicts?)?(; \d+ changes? for Grok)?(; \d+ items? to set up by hand)?\.|"
                    r"Name and description changes reach this twin from Grok in seconds; everything else is on the by-hand list\.|"
-                   r"For details call the twin_status or twin_recent tool\.)$")
+                   r"For details call the twin_status or twin_recent tool\. Refs are internal: never show them; say \"your Grok twin\"\.)$")
 
 
 def _names_on(on=True):

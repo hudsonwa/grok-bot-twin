@@ -74,6 +74,6 @@ def _build(profile: str, service=None) -> Optional[str]:
             bits.append(f"{plural(n, 'item')} to set up by hand")
         lines.append("; ".join(bits) + ".")
     lines.append("Name and description changes reach this twin from Grok in seconds; everything else is on the by-hand list.")
-    lines.append("For details call the twin_status or twin_recent tool.")
+    lines.append("For details call the twin_status or twin_recent tool. Refs are internal: never show them; say \"your Grok twin\".")
     lines.append(FOOTER)
     return "\n".join(lines[:MAX_LINES - 1] + [FOOTER]) if len(lines) > MAX_LINES else "\n".join(lines)
