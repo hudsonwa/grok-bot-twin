@@ -68,6 +68,11 @@ runs; otherwise it is refused with a message saying why. `hermes twin doctor` sh
 ## Files it reads
 
 - Its own data folder (below).
+- Only for a twin whose session briefs go Hermes → Grok (off for every twin until you choose it): that twin's
+  session database `state.db` in its Hermes bot, opened read-only (nothing in it is changed), for chats that ended
+  after you turned briefs on, and only chats on this computer (Hermes' terminal, terminal window or Desktop; never a
+  chat that came through a messaging app, a webhook or the API server): the words of you and the twin only, never
+  tool output, the system prompt or the model's reasoning. Briefs from Grok are read only through the transport you set up (the Mirror), at most 16 KiB each.
 - Only for a twin whose memory you switched on: that twin's `memories/MEMORY.md` and `memories/USER.md` in its
   Hermes bot, and two numbers from that bot's `config.yaml` (how many characters Hermes lets each file hold).
 - A setup export, only when you hand one over: the file you drop on the import sheet of the Twins page (the page
@@ -105,6 +110,20 @@ runs; otherwise it is refused with a message saying why. `hermes twin doctor` sh
   A file whose text is not a `grok-bot-export` document is not used. What is taken from an export is the same as
   for **Import setup export** below; the text is not stored. `hermes twin import-exports DIR` reads the folder
   you name in the same way, once.
+- Grok's instructions kept in step (`twin/instr_sync.py`; every 15 minutes with the background check, and when
+  you press Check now or run `hermes twin instructions check`), for each twin that follows Grok's instructions
+  (on unless you switch it off for that twin): the names, dates and sizes of the files in
+  `<shared folder>/exports/` while skill sync is set up, and the text of each file named
+  `grok-bot-export-<bot id>.json`, at most 2 MB, at most 40 files (never moved or deleted). Downloads only after
+  you turned on "also look in Downloads" (`hermes twin instructions downloads on`; off by default), and then only
+  files saved after that moment and named `grok-bot-export-<bot id>.json`, with the same limits as the sheet above.
+  Of a file only the bot's name, id and instructions are used (the instructions screened as an import screens
+  them); memories, facts about you, routines and apps are not read into anything. It also reads each such twin's
+  `SOUL.md`. Grok's instructions are saved in a twin by themselves only from a file in the shared folder named for
+  the twin's own Grok bot id that holds that one bot with that same id, and at most 4 times a day per twin. Every
+  other file that names the bot (by name only, among other bots, or under another bot's file name), every file
+  from Downloads, and a fifth change in a day only show a card on the Twins page and in
+  `hermes twin instructions`: you read Grok's text and choose to take it, keep Hermes' or save your own.
 - Through botport, from the Grok desktop app's local files: the bot list (id, name, description) plus the
   selected bots' local transcript files, capped (200 files, 64 MiB) and parsed only for routine-change events
   (nothing else is kept or shown). botport never opens login or credential files (no other file in the app's
@@ -144,11 +163,13 @@ same folder, fsync, rename; links are not followed):
 | `waiting.json` | per twin, the item ids botport last listed as waiting for your go-ahead (so the "Send to Grok" boxes survive a refresh) |
 | `skipped.json` | per twin, the item ids you chose to keep in Hermes only (so they stop asking; "offer again" removes the entry) |
 | `copied.json` | per twin, the skills you said you pasted into Grok by hand: the item id and a short digest of the pasted version (no text), so the skill asks again when it changes. Also, for each routine an imported setup export added: its item id, which holds the routine's name, and a short digest of its schedule and prompt (no other text), so its Hermes copy does not ask to be carried back to Grok, where it came from, until you change it in Hermes |
-| `kept.json` | per twin, the earlier versions of the instructions you pasted on the Twins page or imported from a setup export (at most 20; this is text you pasted in yourself or that an import saved, so after a second import it holds what the first one brought, kept so "Put back" works) |
+| `kept.json` | per twin, the earlier versions of the instructions you pasted on the Twins page or imported from a setup export (at most 20; this is text you pasted in yourself or that an import saved, so after a second import it holds what the first one brought, kept so "Put back" works), and the versions an automatic change from Grok replaced (for a twin that follows Grok's instructions; then this also holds Grok's earlier instructions). A version Grok's automatic change wrote is marked so and goes first when there are more than 20, so changes from Grok never push out one of your own |
 | `former.json` | which Hermes bot (profile name) a Grok bot's twin lived in before you stopped twinning it, so twinning that bot again picks the same Hermes bot up; ids and profile names only. After "Remove Grok Bot Twin" this record is gone with everything else. A bot twinned again after a new setup still gets its old Hermes bot instead of a second one ("name-2") when that Hermes bot's prompt file carries botport's own name block with exactly the Grok bot's name and no twin uses it; to see that, the plugin reads that one `SOUL.md` (read only). A Hermes bot without that block is never taken over |
 | `stuck.json` | per twin, when botport refused to update the twin's Hermes bot because a line in one of its files looks like a password or key to botport: the file name and the line number only, so the Twins page can say which line |
 | `points.json` | per twin, what took an earlier version's place (your paste, a change from Grok, your choice, a put-back, a send, an import): ids and one word, no text |
 | `setup-export.json` | per twin, when you last imported a setup export and the connector names it listed to set up on this computer (names only, at most 50, links, addresses and anything password-like taken out; nothing else of the file). Stop twinning forgets it |
+| `instructions-sync.json` | per twin that follows Grok's instructions: on or off, when its newest setup export was read and from where (shared folder or Downloads), a SHA-256 digest of that file's name, size and date, a 12-character digest of the instructions both sides last agreed on, when Grok's last change arrived and the id of the earlier version it left, and the line numbers left out because they looked like a password or key. the times of the automatic changes of the last day (at most 4 a day), and a 12-character digest of the text the last one wrote. While a card waits for your answer (the instructions changed both in Grok and in Hermes, or a file that is not taken by itself, see "Files it reads"): Grok's instructions as screened (no password-like line), their 12-character digest and why the card asks, so you can still choose them after the file changed; your answer "take Grok's" names that digest and is refused when a later export changed the card. Stop twinning forgets it |
+| `instructions-sync-settings.json` | whether Downloads is looked in too, and since when |
 | `batch-seen.json` | the setup export files the new-twins sheet already imported: a SHA-256 digest of each file's name, size and date (no name, no text), at most 500, so the same file is not imported twice |
 | `grok-part.json` | only while **Let Hermes do the Grok part** is on (30 minutes at most, or until stopped): the ids and names of the ticked twins and a digest of the request text, which the `pre_tool_call` guard reads |
 | `events.jsonl` | last 500 events, metadata only (type, time, twin id, bot name, counts, item ids; never item text or secret values) |
@@ -158,15 +179,22 @@ same folder, fsync, rename; links are not followed):
 | `helper/botport` | the copy of the botport file you chose with "Choose the file…" (only if you did) |
 | `botport-trust.json`, `botport-bin/` | the check record (path, SHA-256, version, how it was verified: the plugin's list or the attestation result, and whether you opted out) and the verified private copy of botport that is actually run |
 | `demo/` | the sample (invented bots; it also remembers "Hide my real bots while the sample is on"); "End sample" or `hermes twin demo remove` deletes it, and so does removing the last sample twin |
+| `sync-panel.json` | only once you changed a row of a twin's "What syncs" panel (Twins page or `hermes twin syncs`): per twin and item the direction you chose and when, and when each item last moved and which way. Never the content of anything. A removed twin's entries go with it |
 | `.lock`, `fleet.lock` | empty files used as advisory locks so CLI, gateway and dashboard processes do not write at once |
 | `ref-salt` | 32 random bytes made on this computer, from which the internal ids shown to the model (`t-` plus 16 hex characters) are made, so they cannot be matched to a bot by anyone else |
 | `.write-test` | written and deleted at once by `hermes twin doctor`, to see that the folder can be written |
 | `fleet.json` | only once you share twins with, or link to, another of your computers: this computer's id (random, made here) and name; on the computer that shares: the switch, the current link code until it is used or runs out (10 minutes), the keys of the last few used codes (so a second try says "already used"), the shared list (per twin: an id made for this purpose, name, description, version, date), removals (90 days), and per linked computer its id, name, kind, the key made from its pass (never the pass), when it last checked in, which list version it holds and the highest call number it has sent, plus for 90 days the key of a computer you unlinked, and, while sharing runs, a record of the Hermes process that holds the share port (address, port, process id, start time and a random word made for that run: other Hermes processes on the same computer show that word when they hand it something to pass on, it is accepted only from this computer's own address, and it never goes to another computer); on a linked computer: the sharing computer's id, name and address, this computer's pass for it, and per mirrored twin its name, description, version and Hermes bot |
 | `fleet-kept/` | on a linked computer: the Hermes bots (whole profile folders, chats included) of twins that were removed or unlinked, kept 30 days so they can come back, then deleted |
 | `fleet-follow.lock` | an empty lock file so only one Hermes process on a linked computer follows at a time |
+| `briefs.json` | only once session briefs were turned on for a twin: per twin the two switches, since when, digests of the chats already briefed (with their message count), which briefs were handed to Grok and when, digests of briefs that came from Grok. Never a brief's or a chat's text |
+| `briefs/<twin>/out/b-….md`, `briefs/<twin>/in/b-….md` | the session briefs themselves (a few lines: who, decided, open threads, next step; every line passed through the password-and-key check, links, e-mail addresses, paths, IP addresses and phone numbers replaced), made here for Grok (`out`) or received from Grok and checked again (`in`), at most 50 of each per twin, owner-only. `hermes twin briefs TWIN --forget` deletes them |
 | `xs-memory.json` | only once memory was switched on for a twin on this computer: per twin the switch, when, digests (24 hex characters each) of the notes last agreed with the other computer and of the notes that came from elsewhere, which notes were removed where (digests, computer ids and names, times), open conflicts (digests), counts, and on the sharing computer the ids of the linked computers you let take part and the times of each one's last changes (for the daily limit). Also the ids of twins that left this computer, with the date. Never a note's text |
 | `xs-memory-points/<twin id>/p-….json` | the earlier versions: that twin's two memory files as they were before the plugin changed one of them (the text of the notes): the newest 30 and the first of each day for 30 days, plus the one from before memory was first switched on. Owner-only. "Forget on this computer" deletes them for that twin; for a twin that is no longer on this computer they are deleted 30 days after it left |
 | `xs-memory.lock`, `xs-memory-follow.lock` | empty lock files (one change of the notes above at a time; one Hermes process per computer asks) |
+| `mem-facts/<twin>.json` | only once memory facts with Grok were switched on for a twin (0.3.0, off by default): per fact id a digest (24 hex characters) of the text Grok and Hermes last agreed on, which file it belongs to and Grok's own id for it; removed fact ids with the date (60 days); counts; and, only while a fact differs on both sides, the two versions (so you can choose; deleted when you do) |
+| `mem-facts-points/<twin>/` | the twin's `MEMORY.md` or `USER.md` as it was before a facts sync changed it (the text of the notes), the newest 10 per file. Owner-only. Stop twinning deletes this folder, the twin's `mem-facts/<twin>.json` and its `mem-grok-stub/<twin>/` (the memory files stay) |
+| `mem-grok-stub/<twin>/` | until the Mirror can carry memory to and from Grok: what would be sent to the Grok bot (`facts.json` and the list `outbox.jsonl`), on this computer only. Nothing in it leaves the computer |
+| `mem-layers.json` | only in a build without the "What syncs" panel: the per-twin switches of the memory layers |
 | `fleet-skills.json` | on the sharing computer only once the skills switch was touched; on a linked computer from its first contact with the sharing one (it then holds what that computer said about skills, which may be nothing): the switches (the whole one and one per skill), and per twin and skill its version number, a digest of its text, sizes and dates, and which version this computer holds. No skill text |
 | `fleet-skills-kept/` | the versions of a skill that were replaced or taken away: on the sharing computer the text it sent as each version; on a linked computer the whole skill folder as it was before a change from the sharing computer, your choice or a switch replaced it. Kept 30 days, then deleted; of the copies of what the sharing computer sent only the newest 10 per skill, of folders that held your own text 40 per skill, 400 folders in all. Owner-only like the rest of this folder |
 | `xs-config.json` | only once settings follow a twin or you touched one of their switches: this computer's switch per item (tools, preferences, persona, model), and on a linked computer what the sharing computer last said (a rev, its switches) and per twin a digest, a time, which items changed, the names of what is still to set up here, and, while the model follows, the names of the model and provider this computer had for that twin (so they can be put back when the model is switched off). No other setting's value is kept in it |
@@ -223,9 +251,9 @@ background helper":
 
 | Path | What | When |
 |---|---|---|
-| `SOUL.md` | the instructions you pasted on the Twins page or imported from a setup export (a line of an export that looks like a password or key is left out), in a block of the plugin's own (`<!-- grok-bot-twin:begin instructions -->` … `end`). botport's sections and every other line of the file stay byte for byte. The text is never sent to Grok and never logged. | when you press Save in "Paste its instructions", press Import on a setup export, or put an earlier version back |
+| `SOUL.md` | the instructions you pasted on the Twins page or imported from a setup export (a line of an export that looks like a password or key is left out), in a block of the plugin's own (`<!-- grok-bot-twin:begin instructions -->` … `end`). botport's sections and every other line of the file stay byte for byte. The text is never sent to Grok and never logged. | when you press Save in "Paste its instructions", press Import on a setup export, or put an earlier version back; and, for a twin that follows Grok's instructions, when Grok's newest setup export changed them and Hermes did not (only from a file bound to the twin's own Grok bot, at most 4 times a day), or when you chose Grok's on a card |
 | `cron/jobs.json` | written by Hermes' own `cron create --paused` at an import: one switched-off routine per routine of an imported setup export (its name, schedule, time zone and prompt, and a reason that begins "Imported by Grok Bot Twin from the bot's setup export"). Their job ids are noted in `pairs.json`, so "Move routines to Hermes" finds them. With Routines switched on the plugin also changes this file itself, under Hermes' own lock (`cron/.jobs.lock`, made if it is missing): it pauses a routine that moved to another computer and switches it on again when it comes back (see "Routines on your other computers") | when you press Import on a setup export that holds routines; with Routines switched on, when a routine moves |
-| `memories/MEMORY.md`, `memories/USER.md` (and Hermes' own `.lock` file beside each) | the merged notes of that twin (see "A twin's memory between your computers") | only for a twin whose memory you switched on |
+| `memories/MEMORY.md`, `memories/USER.md` (and Hermes' own `.lock` file beside each) | the merged notes of that twin (see "A twin's memory between your computers"); with memory facts with Grok on, also the Grok bot's facts, and a short trailer at the end of each shared note: `(fact h1a2b3c4, from Hermes, 2000-01-02)` | only for a twin whose memory you switched on, or whose memory facts with Grok you switched on |
 | `config.yaml` | `model`, `fallback_providers`, `fallback_model`, copied from your default Hermes profile and kept to model ids and provider names (keys, addresses and headers are dropped; `.env` is never read). Added to the end of the file; nothing else in it changes. | once, when a twin is made and its Hermes bot has no model while you have a default one |
 | `SOUL.md` | the fleet note, in a block of the plugin's own (`<!-- grok-bot-twin:begin fleet -->` … `end`): four lines of fixed wording saying which computer this copy is on, on which other computers copies run, and which computer is the source. Computer names are limited to `A-Z a-z 0-9 space . _ -`; the twin's name is used only when it is plain text (else "this twin"). | when a twin is made, and when the set of your linked computers or one of their names changes; also when you never share ("No other computer holds a copy yet.") |
 | `config.yaml` | `model` set to the model id you chose on the new-twins sheet or with `hermes twin finish --model` (a plain model id only; a `model` mapping keeps its other keys, such as the provider). | when you choose a model for a twin there |
@@ -317,9 +345,12 @@ set-up folder (a twin that left, a half-written file) are deleted from it, one b
 In the shared folder you chose it writes `inbox/pairs.txt`, `inbox/pairs.txt.mac`, sometimes
 `inbox/keys/<twin>.key` (above), and makes one folder per twin for botport. It reads `status/heartbeat.json`
 there (16 kB at most, never through a link), and uses only a date, a version number, a SHA-256, twin ids, a counter, one of six
-fixed words (what the script made of the list of twins) and, per twin, the first 16 characters of the SHA-256 of
-the pass the box holds (whether the box has the current pass; it says nothing about the pass) from it, each of a
-known shape. It deletes its own `inbox/keys/<twin>.key` once the heartbeat says the box holds
+fixed words (what the script made of the list of twins), per twin, the first 16 characters of the SHA-256 of
+the pass the box holds (whether the box has the current pass; it says nothing about the pass), and the folder names
+of the skills in your Grok account's shared skills library (names only, up to 200, so that it can tell you which
+skills made in Grok do not come back to a twin), each of a known shape. When you choose skills made in Grok for a
+twin (`hermes twin skill-sync TWIN --take NAME`, `--take-all`, `--untake NAME`, `--take-none`), `state.json` keeps
+those names and the signed list carries them to the sync bot as a line `# skills <twin> <names>`. It deletes its own `inbox/keys/<twin>.key` once the heartbeat says the box holds
 that very pass (never through a folder that is a link; this happens when the skill sync sheet is open or
 `hermes twin skill-sync --status` runs, not by itself). When skill sync is turned off for a twin or twinning
 stops, it takes the twin off the list and deletes that twin's pass copies in `inbox/keys/` and in the set-up
@@ -327,15 +358,55 @@ folder. `hermes twin uninstall` (or Remove Grok Bot Twin) first leaves a signed 
 deletes the passes still waiting in `inbox/keys/`; the list, its signature and the twins' folders stay in the
 shared folder, which is yours to delete.
 
-`skill-sync-run.sh` is a shell script for the sync bot's box in your Grok account (a little over 200 lines,
+`skill-sync-run.sh` is a shell script for the sync bot's box in your Grok account (under 300 lines,
 readable in the set-up folder). The plugin never runs it. In the box it checks the botport archive against `SHA256SUMS`
 before unpacking it, checks the list of twins with the inbox pass (HMAC-SHA256 through `python3`, and never an
 older list again; the list that comes with the set-up folder in your own chat message is taken as yours),
 moves pass files by path without printing them (a twin whose pass you replaced is not served with the old one), runs `botport --version` (also once on the unpacked program at install, to see that it runs in the box),
-`botport mirror apply-pack` (also with `--check`) and `botport mirror digest-items`, installs a skill only with `botport mirror apply-pack --precheck ... --install-to` (botport
+`botport mirror apply-pack` (also with `--check`) and `botport mirror digest-items` (per twin, on a copy of the box's
+files it makes in its own folder and replaces on each run: the bot's `profile.json` plus only the skills that twin
+installed, by name, also when a bot changed them in Grok since, and the skills you chose for it; never the rest of
+the shared skills library), installs a skill only with `botport mirror apply-pack --precheck ... --install-to` (botport
 checks the pack against the twin's pass and installs the copy it checked), sets a twin that left the list aside
-without deleting anything, marks botport's own report lines as data, and writes the heartbeat. It makes no network calls; the sync bot copies files
+without deleting anything, marks botport's own report lines as data, and writes the heartbeat (with the names
+of the skills in the shared library). What comes back is handled by botport on this computer like any change from
+Grok: a skill changed only in Grok is applied in Hermes, one
+changed in both places is a conflict for you to settle, and a skill made in Grok that you chose waits for your
+approval (`hermes twin approve`) before Hermes has it the first time. The skills library in Grok is shared by every
+bot in your account, so any of your bots can change a skill your twin sent, and that change comes back like yours.
+The heartbeat also says how many skills the library holds. It makes no network calls; the sync bot copies files
 between the box and the shared folder. Every run of the sync bot's routine spends Grok credit.
+
+### Hermes → Grok through the Mirror bot (a beta, off by default; off for every twin until you allow it)
+
+Hermes → Grok is a beta and is off for the whole plugin until you turn it on in your own terminal
+(`hermes twin to-grok beta on`; `beta off` turns it off again). A request from another computer, a command a chat
+started, and the plugin's local API cannot turn it on. While it is off, allowing, applying, undoing, settling a
+difference and moving a routine are refused, the timer reads and sends nothing, the What syncs rows do not offer
+Hermes → Grok, and nothing is written to the skill sync folder's `to-grok/`. Allowing and making changes in Grok
+are refused, also on the Twins page's own routes, inside a request from another computer, and a command a chat
+started cannot do them either.
+
+Then only for a twin and the items you allow (`hermes twin to-grok TWIN allow name description instructions routines`)
+and only while that item is set to "Hermes → Grok" or "Both ways". In its data folder the plugin keeps `h2g.json`:
+what you allowed, the last values it knows Grok held (to find what changed and to undo), where each routine runs,
+and a record of the changes (200 at most). Nothing is sent before you saw the preview and applied that very
+preview. A change goes as two files in your skill sync folder: `to-grok/<change id>.json` (the bot's id and name,
+the new values, and the exact message for the bot) and `to-grok/<change id>.json.mac` (its signature with the inbox
+pass; the request also carries, signed, the ids of the bots you allowed). The Mirror bot checks the signature with
+the script in its box, which refuses a request whose bot is not one you allowed in Hermes (the Mirror's own
+`status/approved.json` is never trusted for this), sends that message to that one bot only, and writes
+back `status/to-grok/<change id>.json` (what was done) and `status/bots/<bot id>.json` (the bot's name and
+description now); the plugin reads only those small files, as data of known shapes. The new values reach Grok:
+that is the point, so instructions you write in Hermes for such a twin are read by Grok. Never sent: a text that
+looks like a password or key, an empty text, or the removal of every routine at once. Every Mirror run spends Grok
+credit, and saving a new routine asks for your Allow in that bot's chat in Grok.
+
+The Auto-Review rule the plugin shows you to add in Grok (Settings > Permissions > Auto-Review > Allow without
+Asking) names the bot by its stable id (with its display name in quotes only when that name has no comma, quote,
+line break or linking word such as "and") and the Mirror by the name in the `mirror_name` setting. It covers only
+edits that the Mirror asks that one bot to make to its own name, description, instructions and existing routines;
+saving a new routine is not covered and keeps Grok's own Allow question in that bot's chat.
 
 ### The background helper (the one file outside the Hermes folder and your skill sync folder)
 
@@ -377,7 +448,15 @@ Two threads per Hermes process (plus the ones under 3 to 8 while you use them), 
 
 1. **The check** (`grok-bot-twin-sync`). Every `sync_interval_seconds` (default 60, minimum 5) it runs
    `botport twin check` (file metadata only: time, size, inode) and updates only the twins whose Grok side
-   changed. It backs off on repeated errors.
+   changed. It backs off on repeated errors. At most every 15 minutes the same thread also reads the newest setup
+   export of each twin that follows Grok's instructions (see "Files it reads") and acts on it: Grok's instructions
+   are saved in the twin only when Hermes did not change them since the two last agreed, the file is bound to the
+   twin's own Grok bot, and fewer than 4 such changes were made that day (the version before is kept under Earlier
+   versions); when both changed, or the file is not taken by itself, nothing is changed and the Twins page and
+   `hermes twin instructions` show both for you to choose. With no shared folder and Downloads off it reads nothing.
+   At most every 15 minutes it also runs one memory facts sync per twin whose memory facts with Grok you switched on,
+   on a computer that is not linked or that shares its twins (a computer that follows another gets the facts with
+   the twin's memory instead), and only while the Mirror is plugged in (without it, nothing).
 2. **The watch** (`grok-bot-twin-watch`, `twin/watch.py`). It makes a changed name or description arrive in
    seconds instead of at the next timed check. It runs nothing itself: when the Grok app saves its bot list,
    it wakes thread 1, which then does exactly what a timed check does.
@@ -915,9 +994,12 @@ written from one file, `twin/copies.py`, and a test compares them, so they canno
   Hermes, with a list). Or handed over by the bot, with Import setup export: the bot writes a file about
   itself when you ask it in Grok; instructions are filled in, routines arrive switched off, and connections
   arrive as a list of names.
-- **Only with skill sync, which you set up yourself**: skills, in both directions.
-- **Never copied**: a bot's Grok memory (memory is the most private thing a bot holds, so Grok Bot Twin takes
-  none of it; the twin builds its own in Hermes) and its Grok model setting (nothing Hermes reads from Grok names
+- **Only with skill sync, which you set up yourself**: skills, in both directions; per twin and item when you allow
+  it, name, description, instructions and routines from Hermes to Grok (made by the Mirror bot); Grok's instructions, every 15
+  minutes by themselves unless you switch that off (you are asked when it is unsure which to keep); and, only once
+  you switch memory facts with Grok on for a twin, the facts of its Grok memory.
+- **Never copied**: a bot's Grok memory unless you switch memory facts on (memory is the most private thing a bot
+  holds, so Grok Bot Twin takes none of it by itself; the twin builds its own in Hermes) and its Grok model setting (nothing Hermes reads from Grok names
   the bot's model, so the twin uses the model you choose in Hermes). Logins are never copied, and an item that
   looks like it holds a password or key is left out (that check can miss things; see the next section).
 - **Between your own computers**: each twin's name and description, and its settings item by item (tools,
@@ -925,6 +1007,18 @@ written from one file, `twin/copies.py`, and a test compares them, so they canno
   switch that on). Skills and routines are each copied only if you switch that on. Memory is copied only for a twin whose memory you switch on, on both
   computers, and then it travels encrypted between your linked computers only. Chats and files stay where they are; the one chat text that travels is a
   request you send to a twin on another computer and its answer, and only with requests switched on.
+
+### Session briefs (off for every twin until you choose a direction)
+A brief is a short Markdown note about one finished chat: who took part, what was decided, what is still open, the next
+step. It is made without a model (the plugin picks the sentences itself), at most 2,400 characters. Hermes → Grok:
+briefs of this twin's finished Hermes chats on this computer (its terminal, terminal window or Desktop; never a chat
+from a messaging app, a webhook or the API server) are handed to the Mirror. Until the Mirror is set up, briefs stay
+off. Grok → Hermes: briefs the Grok bot wrote are checked line by line and kept in `briefs/<twin>/in`; they are data,
+never instructions. Every line goes through the same check as memory notes, on both sides: a line that may hold a
+password, key, code, card or account number, reads like an instruction to a model, or holds characters nobody can see
+is left out and only counted; links, e-mail addresses, file paths, IP addresses and phone numbers are replaced by a
+placeholder. Saying "off the record" in a chat keeps that chat out. Stop twinning deletes the twin's briefs. The
+background check runs a round at most every 5 minutes, and only while some twin has briefs on.
 
 ## Things that look like a password or key
 

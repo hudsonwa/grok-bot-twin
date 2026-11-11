@@ -5,7 +5,8 @@ This file tells you exactly what to run, what to leave to your owner, and what n
 [README](README.md) is written for you.
 
 Grok Bot Twin is a plugin for Hermes Agent. It gives a bot from the Grok desktop app a twin: a Hermes bot that
-follows it. Nothing ever changes in Grok.
+follows it. Nothing changes in Grok unless your owner turns on the "Hermes → Grok" beta (off by default, only in
+their own terminal) and allows it for a twin (see below).
 
 ## If your owner asked you to set it up
 
@@ -107,8 +108,12 @@ with Hermes and this plugin; no Grok app and no botport needed there), run
 - **Do not turn on what was not asked for**: requests between computers (`hermes twin requests on`), the
   background helper (`hermes twin background on`), skill sync, the activity digest, skills between computers
   (`hermes twin fleet skills on`), routines (`hermes twin routines on`, `run-here on`), a twin's memory
-  (`hermes twin fleet memory TWIN on`), the model setting (`hermes twin fleet settings model on`), and approval
-  from linked computers (`hermes twin requests mode linked`). Each is your owner's
+  (`hermes twin fleet memory TWIN on`), any row of a twin's What syncs panel (`hermes twin syncs TWIN ITEM DIRECTION`;
+  looking with `hermes twin syncs TWIN` is fine), session briefs (`hermes twin briefs --way both`, and `--forget` deletes
+  them), Grok's instructions from Downloads (`hermes twin instructions downloads on`), the model setting (`hermes twin fleet settings model on`), and approval
+  from linked computers (`hermes twin requests mode linked`), and changes made in Grok by the Mirror bot
+  (a beta, off by default: `hermes twin to-grok beta on`, then `hermes twin to-grok TWIN allow`; `apply` only
+  after your owner saw the preview and said yes; these refuse a command a chat started). Each is your owner's
   decision. Skill sync also spends Grok credit on every run.
 - **Do not remove anything without showing it first.** `hermes twin stop`, `hermes twin unlink` and
   `hermes twin uninstall` each take `--dry-run`; show that output and wait for a yes.

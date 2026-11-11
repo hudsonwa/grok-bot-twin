@@ -1,0 +1,11 @@
+{
+  "note": "Shape of the answers about what syncs between a Grok bot and its twin (GET /sync/panel; POST /sync/panel), written from the panel contract. tests/desktop/syncs.mjs checks its invented answers against it; tests/test_sync_panel.py holds the real answers to it.",
+  "shapes": {
+    "SyncChoice": {"required": {"direction": "str", "state": "str", "sentence": "str"}, "optional": {"why": "str"}, "closed": true, "note": "direction: grok_to_hermes | hermes_to_grok | both | off; state: ok | needs_mirror | not_yet; why only when state is not ok"},
+    "SyncItem": {"required": {"key": "str", "label": "str", "direction": "str", "state": "str", "private": "bool", "last_synced_at": "str|null", "last_direction": "str|null", "sentence": "str", "choices": "list[SyncChoice]"}, "optional": {"note": "str", "error": "ErrorBody|null"}, "closed": true, "note": "key: name | description | instructions | skills | routines | memory_facts | session_briefs, in that order; state: ok | needs_mirror | not_yet | error"},
+    "SyncTwin": {"required": {"id": "str", "name": "str", "mirror": "str", "items": "list[SyncItem]"}, "closed": true, "note": "mirror: ready | not_set_up | no_permission"},
+    "SyncMirror": {"required": {"state": "str", "sentence": "str"}, "closed": true, "note": "state: ready | not_set_up | no_permission | unknown"},
+    "SyncPanel": {"route": "GET /sync/panel; POST /sync/panel", "required": {"schema": "str", "mirror": "SyncMirror", "twins": "list[SyncTwin]"}, "optional": {"said": "SyncSaid"}, "closed": true},
+    "SyncSaid": {"required": {"sentence": "str"}, "closed": true}
+  }
+}

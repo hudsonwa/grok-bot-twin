@@ -348,17 +348,21 @@ def kept_list(central: Path, pid: str) -> list:
             ][-KEPT_MAX:] if isinstance(pts, list) else []
 
 
-def keep(central: Path, pid: str, text: str, reason: str, why: str) -> str:
+def keep(central: Path, pid: str, text: str, reason: str, why: str, auto: bool = False) -> str:
     """Keep one earlier version of a twin's instructions (also the empty one from before the first paste).
-    Returns its id, `persona.instructions@<digest>`."""
+    Returns its id, `persona.instructions@<digest>`. `auto`: this text was written by an automatic change from Grok
+    (twin/instr_sync.py); past KEPT_MAX such versions go first, so a run of Grok's changes never pushes out one of
+    the owner's own."""
     rid = f"{INSTRUCTIONS_ITEM}@{text_digest(text)}"
     with store.locked():
         data = store.read_json(_kept_path(central), {}) or {}
         data = data if isinstance(data, dict) else {}
         pts = [p for p in kept_list(central, pid) if p["id"] != rid]
         pts.append({"id": rid, "item": INSTRUCTIONS_ITEM, "at": now_iso(), "reason": reason, "why": why,
-                    "text": text[:INSTRUCTIONS_CAP]})
-        data[pid] = pts[-KEPT_MAX:]
+                    "text": text[:INSTRUCTIONS_CAP], **({"auto": True} if auto else {})})
+        while len(pts) > KEPT_MAX:
+            del pts[next((i for i, p in enumerate(pts[:-1]) if p.get("auto") is True), 0)]
+        data[pid] = pts
         store.atomic_write_json(_kept_path(central), data)
     return rid
 

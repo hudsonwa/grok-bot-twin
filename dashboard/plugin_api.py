@@ -378,6 +378,51 @@ async def batch_import(body: Any = Body(None)) -> Any:
     return await _call(svc.batch_import, b.get("files"), _pid_list(b.get("pair_ids")))
 
 
+@router.get("/pairs/{pid}/instructions-sync")
+async def instructions_sync_info(pid: str) -> Any:
+    """Grok's instructions kept in step for one twin: on or off, the last re-read of its setup export, and the
+    conflict card when the instructions changed both in Grok and in Hermes."""
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.instructions_sync_info, _pid(pid))
+
+
+@router.post("/pairs/{pid}/instructions-sync")
+async def instructions_sync_set(pid: str, body: Any = Body(None)) -> Any:
+    """{"on": bool}: follow Grok's instructions for this twin, or stop."""
+    b = _body(body)
+    if not isinstance(b.get("on"), bool):
+        raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.instructions_sync_set, _pid(pid), b["on"])
+
+
+@router.post("/pairs/{pid}/instructions-sync/resolve")
+async def instructions_sync_resolve(pid: str, body: Any = Body(None)) -> Any:
+    """{"choice": "grok"|"hermes"|"text", "text", "grok_digest"}: the owner's answer to the conflict card;
+    `grok_digest` (the card's own, needed for "grok") names the version of Grok's instructions the owner read."""
+    b = _body(body)
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.instructions_conflict_resolve, _pid(pid), b.get("choice"), b.get("text"),
+                       b.get("grok_digest"))
+
+
+@router.post("/instructions-sync/check")
+async def instructions_sync_check(body: Any = Body(None)) -> Any:
+    """{"pair_id"} (optional): re-read the newest setup exports now instead of at the next background check."""
+    b = _body(body)
+    pid = b.get("pair_id")
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.instructions_sync_now, None if pid is None else _pid(pid if isinstance(pid, str) else ""))
+
+
+@router.post("/instructions-sync/settings")
+async def instructions_sync_settings(body: Any = Body(None)) -> Any:
+    """{"downloads": bool}: also look for setup exports in Downloads in the background (off by default)."""
+    b = _body(body)
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.instructions_sync_settings, b.get("downloads"))
+
+
 @router.post("/batch/downloads")
 async def batch_downloads(body: Any = Body(None)) -> Any:
     """{"since", "pair_ids", "apply"}: setup exports saved to Downloads since then, imported into the ticked twins
@@ -430,6 +475,16 @@ async def skill_sync_setup(pid: str, body: Any = Body(None)) -> Any:
     b = _body(body)
     svc = await asyncio.to_thread(_svc)
     return await _call(svc.skill_sync_setup, _pid(pid), b.get("folder"), _bool(b, "remake"))
+
+
+@router.post("/pairs/{pid}/skill-sync/take")
+async def skill_sync_take(pid: str, body: Any = Body(None)) -> Any:
+    """Which skills made in Grok come back to this twin: {"add": [names], "remove": [names], "every": true|false}."""
+    b = _body(body)
+    every = b.get("every")
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.skill_sync_take, _pid(pid), b.get("add") or [], b.get("remove") or [],
+                       every if isinstance(every, bool) else None)
 
 
 @router.post("/pairs/{pid}/mirror")
@@ -880,3 +935,126 @@ async def fleet_skills_restore(body: Any = Body(None)) -> Any:
         raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
     svc = await asyncio.to_thread(_svc)
     return await _call(_skills().restore, svc, b["twin"], b["skill"], b["vid"])
+
+
+# ---- what syncs between a Grok bot and its twin (twin/sync_panel.py) -----------------
+_SYNC_WORD_RE = re.compile(r"^[a-z_]{1,20}$")
+
+
+def _sync_panel() -> Any:
+    return importlib.import_module(_package().__name__ + ".sync_panel")
+
+
+@router.get("/sync/panel")
+async def sync_panel_get() -> Any:
+    """Every twin on this computer: its seven rows, which way each goes, when it last synced. Local files only."""
+    svc = await asyncio.to_thread(_svc)
+    return await _call(_sync_panel().view, svc)
+
+
+@router.post("/sync/panel")
+async def sync_panel_set(body: Any = Body(None)) -> Any:
+    """{"twin": id, "item": key, "direction": d}: the owner's choice for one item of one twin."""
+    b = _body(body)
+    if not isinstance(b.get("twin"), str) or not _ID_RE.match(b["twin"]) or \
+            not all(isinstance(b.get(k), str) and _SYNC_WORD_RE.match(b[k]) for k in ("item", "direction")):
+        raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
+    svc = await asyncio.to_thread(_svc)
+    return await _call(_sync_panel().choose, svc, b["twin"], b["item"], b["direction"])
+
+
+# ---- session briefs (twin/briefs.py) ---------------------------------------------------------------
+_BRIEF_WAYS = ("grok_to_hermes", "hermes_to_grok", "both", "off")
+
+
+@router.get("/briefs")
+async def briefs_get() -> Any:
+    """Every twin's session-brief direction, counts and the latest briefs from Grok (already filtered)."""
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.briefs_info)
+
+
+@router.post("/briefs")
+async def briefs_set(body: Any = Body(None)) -> Any:
+    """{"twin": id, "direction": grok_to_hermes | hermes_to_grok | both | off}; off by default for every twin."""
+    b = _body(body)
+    twin = _twin_word(b)
+    if b.get("direction") not in _BRIEF_WAYS:
+        raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.briefs_set, twin, b["direction"])
+
+
+@router.post("/briefs/now")
+async def briefs_now(body: Any = Body(None)) -> Any:
+    """{"twin"?: id}: one round now (counts only, never a brief's text)."""
+    b = _body(body)
+    twin = _twin_word(b) if b.get("twin") is not None else None
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.briefs_now, twin)
+
+
+@router.post("/briefs/forget")
+async def briefs_forget(body: Any = Body(None)) -> Any:
+    """{"twin": id}: delete every brief kept for this twin; its briefs go off."""
+    twin = _twin_word(_body(body))
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.briefs_forget, twin)
+
+
+# ---- Hermes -> Grok through the Mirror bot (twin/h2g.py, twin/h2g_service.py) ----------------------------------------
+_H2G_ITEMS = ("name", "description", "instructions", "routines")
+_H2G_CHANGE_RE = re.compile(r"^c-[0-9a-f]{16}$")
+_H2G_RKEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def _h2g_bad() -> HTTPException:
+    return HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
+
+
+def _h2g_items(b: dict) -> Any:
+    items = b.get("items", "all")
+    if items == "all":
+        return "all"
+    if not isinstance(items, list) or not items or len(items) > 4 or not all(i in _H2G_ITEMS for i in items):
+        raise _h2g_bad()
+    return items
+
+
+@router.get("/pairs/{pid}/to-grok")
+async def to_grok_get(pid: str) -> Any:
+    """What the Mirror may change in Grok for this twin, its recent changes, and the preview of what would go now."""
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.to_grok_info, _pid(pid))
+
+
+@router.post("/pairs/{pid}/to-grok/{action}")
+async def to_grok_post(pid: str, action: str, body: Any = Body(None)) -> Any:
+    """allow / disallow {"items": [..] | "all"}; apply / undo {"change_id": "c-…"};
+    resolve {"item": "name"|"description"|"instructions", "keep": "hermes"|"grok"}; runner {"routine": key, "to": "grok"|"hermes"};
+    give-up {} (stop waiting for the Mirror's answer). Every change refuses inside a request from another computer
+    (tasks.asked_turn) and while the Hermes to Grok beta is off; the beta itself is turned on only in the owner's
+    own terminal (no route here)."""
+    b = _body(body)
+    p = _pid(pid)
+    svc = await asyncio.to_thread(_svc)
+    if action == "allow":  # the page's own route: never a request from another computer (tasks.asked_turn)
+        return await _call(svc.to_grok_allow, p, _h2g_items(b), True)
+    if action == "disallow":
+        return await _call(svc.to_grok_disallow, p, _h2g_items(b))
+    if action in ("apply", "undo"):
+        if not isinstance(b.get("change_id"), str) or not _H2G_CHANGE_RE.match(b["change_id"]):
+            raise _h2g_bad()
+        return await _call(getattr(svc, f"to_grok_{action}"), p, b["change_id"], True)
+    if action == "resolve":
+        if b.get("item") not in _H2G_ITEMS[:3] or b.get("keep") not in ("hermes", "grok"):
+            raise _h2g_bad()
+        return await _call(svc.to_grok_resolve, p, b["item"], b["keep"], True)
+    if action == "runner":
+        if not isinstance(b.get("routine"), str) or not _H2G_RKEY_RE.match(b["routine"]) or \
+                b.get("to") not in ("grok", "hermes"):
+            raise _h2g_bad()
+        return await _call(svc.to_grok_runner, p, b["routine"], b["to"], True)
+    if action == "give-up":
+        return await _call(svc.to_grok_give_up, p, True)
+    raise HTTPException(status_code=404, detail={"code": "not_found", "message": "That request was not understood."})

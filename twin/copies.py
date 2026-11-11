@@ -37,15 +37,20 @@ _ROWS: tuple[tuple[str, str, str, str, Optional[str], Optional[str]], ...] = (
      "By itself, in seconds, while Hermes is open.", None, None),
     ("setup", "grok", "Instructions, routines and connections",
      "With Import setup export: the bot writes a file about itself when you ask it in Grok. Instructions are filled "
-     "in, routines arrive switched off, and connections arrive as a list of names. Logins are never copied.",
+     "in, routines arrive switched off, and connections arrive as a list of names. Logins are never copied. With skill "
+     "sync set up, instructions also follow Grok's every 15 minutes by themselves, unless you switch that off. When "
+     "it is unsure which to keep, you are asked.",
      "xs-export",
      "You bring these over yourself: paste the instructions once, then make the routines and connections again in "
      "Hermes. Importing the bot's setup export is not in this version yet."),
     ("skills", "grok", "Skills",
      "With skill sync, which is optional: a sync bot in your own Grok account carries them. Without it you copy "
      "them yourself.", None, None),
+    ("grok-conversations", "grok", "Conversations",
+     "Does not copy: whole conversations stay in Grok. Copying them comes in a later version.", None, None),
     ("grok-memory", "grok", "Grok memory",
-     "Does not copy: memory is the most private thing a bot holds, so Grok Bot Twin takes none of it.", None, None),
+     "Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory "
+     "facts, which need skill sync.", None, None),
     ("grok-model", "grok", "Grok model setting",
      "Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in "
      "Hermes.", None, None),

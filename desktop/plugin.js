@@ -2370,9 +2370,10 @@ const WHAT_COPIES = [
     title: 'From Grok to Hermes',
     rows: [
       { what: 'Name and description', how: 'By itself, in seconds, while Hermes is open.' },
-      { what: 'Instructions, routines and connections', how: 'With Import setup export: the bot writes a file about itself when you ask it in Grok. Instructions are filled in, routines arrive switched off, and connections arrive as a list of names. Logins are never copied.' },
+      { what: 'Instructions, routines and connections', how: "With Import setup export: the bot writes a file about itself when you ask it in Grok. Instructions are filled in, routines arrive switched off, and connections arrive as a list of names. Logins are never copied. With skill sync set up, instructions also follow Grok's every 15 minutes by themselves, unless you switch that off. When it is unsure which to keep, you are asked." },
       { what: 'Skills', how: 'With skill sync, which is optional: a sync bot in your own Grok account carries them. Without it you copy them yourself.' },
-      { what: 'Grok memory', how: 'Does not copy: memory is the most private thing a bot holds, so Grok Bot Twin takes none of it.' },
+      { what: 'Conversations', how: 'Does not copy: whole conversations stay in Grok. Copying them comes in a later version.' },
+      { what: 'Grok memory', how: 'Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory facts, which need skill sync.' },
       { what: 'Grok model setting', how: "Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in Hermes." }
     ]
   },
@@ -2626,7 +2627,226 @@ function SameOrNot({ pair, open, onShow, onFinish, more = [], initialOpen = fals
   )
 }
 
-function CopiesPanel({ pair, open, intervalS, fastCheck, onSkillSync, onShow, onFinish, initialTechnical = false, initialTable = false }) {
+// ── What syncs: one twin's seven things, and which way each goes ────────────
+//
+// The owner's choice, per twin and per thing: from Grok to Hermes, back, both ways, or off. The backend owns
+// whether a way can work yet and when something last moved; the page shows what it last said (never ahead of
+// it) and sends one choice at a time. One read of GET /sync/panel serves every twin. Folded inside a twin's
+// Details, under the whole table, so the calm page does not grow. Not on the sample, and nothing at all on a
+// backend that does not answer in this shape.
+
+const SYNC_PANEL_KEY = [ID, 'sync-panel']
+const SYNC_SCHEMA = 'grok-bot-twin.syncpanel.v1'
+// the seven things, always in this order, with the page's own label for each
+const SYNC_ITEMS = [
+  ['name', 'Name'],
+  ['description', 'Description'],
+  ['instructions', 'Instructions'],
+  ['skills', 'Skills'],
+  ['routines', 'Routines'],
+  ['memory_facts', 'Memory facts'],
+  ['session_briefs', 'Session briefs']
+]
+const SYNC_WAYS = { grok_to_hermes: 'Grok → Hermes', hermes_to_grok: 'Hermes → Grok', both: 'Both ways', off: 'Off' }
+const SYNC_ROW_STATES = ['ok', 'needs_mirror', 'not_yet', 'error']
+const SYNC_MIRROR_STATES = ['ready', 'not_set_up', 'no_permission', 'unknown']
+const SYNC_NEEDS_MIRROR = 'Needs the Mirror'
+const SYNC_NOT_YET = 'Not in this version yet'
+const SYNC_PRIVATE = 'Memory, session briefs and conversations start off for every twin, and only you switch them on.'
+const syncGroupLabel = (label, twin) => `${label} for ${twin}: which way it syncs`
+
+// GET (or POST) /sync/panel, tidied once: every text clean and capped, every key, way and state one of the
+// page's own. null: not this answer (an older backend, a problem), and the page shows none of it.
+function syncPanelOf(raw) {
+  if (!raw || typeof raw !== 'object' || raw.schema !== SYNC_SCHEMA || !Array.isArray(raw.twins)) {
+    return null
+  }
+
+  const text = (v, max = 300) => clean(typeof v === 'string' ? v : '', max)
+  const way = v => (Object.hasOwn(SYNC_WAYS, v) ? v : null)
+  const mirror = raw.mirror && typeof raw.mirror === 'object' ? raw.mirror : {}
+  const twins = raw.twins
+    // (a twin's id goes back to the backend exactly as it came: anything that is not plain short text is left out)
+    .filter(t => t && typeof t === 'object' && typeof t.id === 'string' && t.id !== '' && t.id.length <= 120 && t.id === clean(t.id, 120))
+    .slice(0, 100)
+    .map(t => {
+      const given = listOf(t.items).filter(i => i && typeof i === 'object').slice(0, 20)
+      const items = SYNC_ITEMS.flatMap(([key, label]) => {
+        const i = given.find(g => g.key === key)
+
+        if (!i) {
+          return []
+        }
+
+        const state = SYNC_ROW_STATES.includes(i.state) ? i.state : 'error'
+        const offered = listOf(i.choices).filter(c => c && typeof c === 'object').slice(0, 8)
+        // the four ways, always in this order; a way the backend did not offer as it should cannot be chosen
+        const choices = Object.keys(SYNC_WAYS).map(direction => {
+          const c = offered.find(o => o.direction === direction)
+          const can = ['ok', 'needs_mirror', 'not_yet'].includes(c?.state) ? c.state : 'not_yet'
+
+          return { direction, sentence: text(c?.sentence), state: can, why: can === 'ok' ? '' : text(c?.why) || (can === 'needs_mirror' ? `${SYNC_NEEDS_MIRROR}.` : `${SYNC_NOT_YET}.`) }
+        })
+        const err = i.error && typeof i.error === 'object' ? i.error : null
+
+        return [
+          {
+            choices,
+            direction: way(i.direction),
+            error: state === 'error' ? { code: text(err?.code, 40) || 'error', message: text(err?.message) } : null,
+            key,
+            label: text(i.label, 40) || label,
+            lastAt: isoOf(i.last_synced_at),
+            lastWay: ['grok_to_hermes', 'hermes_to_grok'].includes(i.last_direction) ? i.last_direction : null,
+            note: text(i.note),
+            private: i.private === true,
+            sentence: text(i.sentence),
+            state
+          }
+        ]
+      })
+
+      return { id: t.id, items, mirror: ['ready', 'not_set_up', 'no_permission'].includes(t.mirror) ? t.mirror : 'not_set_up', name: text(t.name, 60) || 'This twin' }
+    })
+
+  return {
+    mirror: { sentence: text(mirror.sentence, 400), state: SYNC_MIRROR_STATES.includes(mirror.state) ? mirror.state : 'unknown' },
+    said: raw.said && typeof raw.said === 'object' ? text(raw.said.sentence, 400) : '',
+    twins
+  }
+}
+
+// An answer in hand is shown at once; the next read confirms it.
+function showSyncPanel(res) {
+  if (syncPanelOf(res)) {
+    queryClient.setQueryData?.(SYNC_PANEL_KEY, res)
+  } else {
+    void queryClient.invalidateQueries({ queryKey: SYNC_PANEL_KEY })
+  }
+}
+
+// "Last synced 3 min ago, Grok → Hermes" / "Not synced yet"
+function syncedText(item) {
+  const when = item.lastAt ? ago(item.lastAt) : null
+
+  return when ? `Last synced ${when}${item.lastWay ? `, ${SYNC_WAYS[item.lastWay]}` : ''}` : 'Not synced yet'
+}
+
+// One of the four ways: a plain radio button with its words. Its sentence (what choosing it does) is the
+// hover text; a way that cannot be chosen is described by the line under the group that says why.
+function SyncOption({ id, name, choice, checked, disabled, why, onChoose }) {
+  return el(
+    'label',
+    { className: cn('inline-flex min-h-7 items-center gap-1.5', BODY, checked && 'text-(--ui-text-primary)', !disabled && 'cursor-pointer'), htmlFor: id, title: choice.sentence || undefined },
+    el('input', { 'aria-describedby': why || undefined, checked, className: 'shrink-0', disabled, id, name, onChange: () => onChoose(choice.direction), type: 'radio', value: choice.direction }),
+    SYNC_WAYS[choice.direction]
+  )
+}
+
+// One thing that can sync: its name, the four ways, what the way in effect means, and when it last moved.
+// `said`: how the last act on this row ended ({ problem } or { said }), until the next act.
+function SyncRow({ twin, item, busy, said, act }) {
+  const id = `gbt-sync-${item.key}`
+  const waiting = Boolean(busy)
+  const shut = item.choices.filter(c => c.state !== 'ok')
+  // the ways that cannot be chosen, grouped by their reason: "Hermes → Grok, Both ways: Needs the Mirror, …"
+  const whys = [...new Set(shut.map(c => c.why))].map(why => ({ text: `${shut.filter(c => c.why === why).map(c => SYNC_WAYS[c.direction]).join(', ')}: ${why}`, why }))
+  const whyId = why => `${id}-why-${whys.findIndex(w => w.why === why)}`
+  // (a tag only on a row where nothing moves: a row that syncs one way is not "waiting", its why lines say the rest)
+  const tag = item.direction !== 'off' && item.direction !== null ? '' : item.state === 'needs_mirror' ? SYNC_NEEDS_MIRROR : item.state === 'not_yet' ? SYNC_NOT_YET : ''
+
+  return el(
+    'li',
+    { className: BOX },
+    el('div', { className: 'flex flex-wrap items-center gap-x-2 gap-y-1' }, el('h3', { className: HEADING, id: `${id}-label` }, item.label), tag && jsx(Tag, { children: tag })),
+    // (never ahead of the answer: the checked way is the one the backend last said, so a refusal leaves it where it was)
+    el(
+      'div',
+      { 'aria-label': syncGroupLabel(item.label, twin.name), className: 'flex flex-wrap items-center gap-x-3', role: 'radiogroup' },
+      item.choices.map(c =>
+        jsx(
+          SyncOption,
+          { checked: item.direction === c.direction, choice: c, disabled: waiting || c.state !== 'ok', id: `${id}-${c.direction}`, name: id, onChoose: d => act(item, d), why: c.state === 'ok' ? '' : whyId(c.why) },
+          c.direction
+        )
+      )
+    ),
+    item.sentence && el('p', { className: cn(BODY, 'text-(--ui-text-primary)') }, item.sentence),
+    el('p', { className: SMALL }, syncedText(item)),
+    item.note && el('p', { className: SMALL }, item.note),
+    whys.map((w, i) => el('p', { className: SMALL, id: `${id}-why-${i}`, key: i }, w.text)),
+    item.state === 'error' && jsx(InlineProblem, { error: new TwinError(item.error?.message || FALLBACK_PROBLEM, item.error?.code || 'error') }),
+    said?.problem && jsx(InlineProblem, { error: said.problem }),
+    said?.said && el('p', { className: cn(BODY, 'text-(--ui-text-primary)'), role: 'status' }, said.said)
+  )
+}
+
+// The panel for one twin. `twin`: its part of the tidied answer. `onMirror`: opens the twin's skill sync set-up,
+// where the Mirror is set up (offered once, for every row that needs it).
+function SyncsPanel({ twin, mirror, onMirror, initialSaid = null }) {
+  const [busy, run] = useBusy()
+  const [said, setSaid] = useState(initialSaid) // { item, problem } | { item, said } | null
+
+  // One choice at a time for the whole panel: every way waits while it runs. What comes back is shown as it is;
+  // a refusal is said in that row, in the backend's words, and nothing else changes.
+  // (a way that cannot be chosen is never sent, whatever let the press through)
+  const act = (item, direction) =>
+    item.choices.some(c => c.direction === direction && c.state === 'ok') &&
+    run(`${item.key}:${direction}`, async () => {
+      let next
+
+      setSaid(null)
+
+      try {
+        const res = await post('/sync/panel', { twin: twin.id, item: item.key, direction })
+
+        showSyncPanel(res)
+        next = { item: item.key, said: syncPanelOf(res)?.said ?? '' }
+      } catch (err) {
+        next = { item: item.key, problem: asProblem(err) }
+      }
+
+      setSaid(next)
+
+      return next
+    })
+
+  const needsMirror = twin.mirror !== 'ready' && twin.items.some(i => i.choices.some(c => c.state === 'needs_mirror'))
+  const row = item => jsx(SyncRow, { act, busy, item, said: said?.item === item.key ? said : null, twin }, item.key)
+  const open = twin.items.filter(i => !i.private)
+  const kept = twin.items.filter(i => i.private)
+
+  return el(
+    'div',
+    { className: 'flex flex-col gap-2' },
+    needsMirror &&
+      el(
+        'div',
+        { className: cn(NOTE, 'flex flex-wrap items-center gap-2') },
+        el('span', { className: 'min-w-0 flex-1', id: 'gbt-sync-mirror' }, mirror.sentence || 'Some of these need the Mirror: a small bot in your Grok account that carries changes.'),
+        onMirror ? el(Button, { 'aria-describedby': 'gbt-sync-mirror', onClick: onMirror, variant: 'secondary' }, 'Skill sync…') : el('span', {}, "Set it up with Skill sync… in this twin's menu.")
+      ),
+    open.length > 0 && el('ul', { className: 'flex flex-col gap-1.5' }, open.map(row)),
+    kept.length > 0 && el('p', { className: SMALL }, SYNC_PRIVATE),
+    kept.length > 0 && el('ul', { className: 'flex flex-col gap-1.5' }, kept.map(row))
+  )
+}
+
+// The fold in a twin's Details: there only when the backend answers about this very twin.
+function SyncsFold({ pair, onMirror, initialOpen = false, initialSaid = null }) {
+  const sample = isSample(pair)
+  const q = useQuery({ enabled: !sample, queryFn: () => api('/sync/panel'), queryKey: SYNC_PANEL_KEY, refetchInterval: 10_000, retry: 1 })
+  const panel = sample ? null : syncPanelOf(q.data)
+  const twin = panel?.twins.find(t => t.id === pair?.pair_id)
+
+  if (!twin || twin.items.length === 0) {
+    return null
+  }
+
+  return el(Fold, { initialOpen, label: 'What syncs' }, jsx(SyncsPanel, { initialSaid, mirror: panel.mirror, onMirror, twin }))
+}
+
+function CopiesPanel({ pair, open, intervalS, fastCheck, onSkillSync, onShow, onFinish, initialTechnical = false, initialTable = false, initialSyncs = false }) {
   const [busy, run] = useBusy()
   const g2h = coverageGroups(pair?.coverage, 'g2h')
   const h2g = coverageGroups(pair?.coverage, 'h2g')
@@ -2663,6 +2883,8 @@ function CopiesPanel({ pair, open, intervalS, fastCheck, onSkillSync, onShow, on
     // (the lines above are this twin's; the table is every twin's, with the reasons: one press away, so the
     // sheet stays within its words)
     el(Fold, { initialOpen: initialTable, label: 'The whole table' }, jsx(WholeTable, {})),
+    // (which way each of this twin's things goes, the owner's choice: folded too, and only on a backend that knows it)
+    jsx(SyncsFold, { initialOpen: initialSyncs, onMirror: onSkillSync, pair }),
     jsx(SameOrNot, {
       initialOpen: initialTechnical,
       more: [back.length > 0 ? `Back to Grok: ${joinWords(back)} you change in Hermes go to Grok when you send them. Everything else you change in Grok yourself.` : 'Back to Grok: nothing goes by itself.'],

@@ -28,7 +28,10 @@ from .batch import BatchMixin
 from .fleet_api import FleetMixin
 from .skill_sync import SkillSyncMixin
 from .routines import RoutinesMixin
+from .instr_sync import InstrSyncMixin
+from .h2g_service import H2GMixin
 from .tasks_api import TasksMixin
+from .briefs import BriefsMixin
 from .engine import (INSTALL_HINT, TRUST_HINT, UNATTESTED_TEXT, BotportEngine, Engine, EngineError, _home_label,
                      find_botport, find_gh, tool_problem_text, valid_tag)
 from .model import (DIRECTIONS, KEEP_SIDES, MIRROR_NOTE, PLUGIN_ID, SAMPLE_PROFILE, STATE_LABELS, clean_waiting,
@@ -110,7 +113,7 @@ RETRY_HINT = "Open the Grok app once, then press Try again."
 UNKNOWN_TWIN_HINT = "Stop twinning it, then twin the bot again."
 # Files in the plugin's data folder that hold a per-twin note, keyed by twin id.
 PER_TWIN_NOTES = ("digest.json", "skipped.json", "waiting.json", "copied.json", "kept.json", "points.json",
-                  "stuck.json", "setup-export.json")
+                  "stuck.json", "setup-export.json", "instructions-sync.json")
 DIGEST_MAX = 20
 
 
@@ -199,7 +202,7 @@ def select_engine(pair_id: Optional[str], demo: DemoEngine, botport: Optional[Bo
 
 
 class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, FleetMixin, TasksMixin, SkillSyncMixin,
-                  RoutinesMixin):
+                  RoutinesMixin, InstrSyncMixin, BriefsMixin, H2GMixin):
     def __init__(self) -> None:
         self.ctx: Any = None
         self.demo = DemoEngine()
@@ -860,7 +863,18 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
     def tick(self) -> int:
         """One timer cycle: metadata check, then a Grok->Hermes sync of each changed pair."""
         self.fleet_tick()  # the safety net for sharing with, or following, the owner's other machines
+        try:
+            self.briefs_tick()  # session briefs: nothing at all while every twin's briefs are off
+        except Exception:
+            log.exception("grok-bot-twin: session briefs round failed")
         self.note_grok_app()
+        self.instructions_sync_tick()  # Grok's instructions re-read from the newest setup exports (every 15 min)
+        try:  # memory facts with Grok (every 15 min): on any computer, linked or not; nothing until the Mirror is there
+            from . import mem_facts as _mem_facts
+            _mem_facts.tick(lambda: self)
+        except Exception:
+            log.exception("grok-bot-twin: memory facts round failed")
+        self.to_grok_tick()  # Hermes -> Grok: the Mirror's answers (files only; nothing when it was never used)
         changed = self.check_changed()
         for pid in changed:
             try:
@@ -1905,7 +1919,8 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                                                       else [])[:100] if isinstance(x, str)]
         if not dry_run:
             reg = self._registry()
-            if reg.pop(pid, None) is not None:
+            entry = reg.pop(pid, None)
+            if entry is not None:
                 self._save_registry(reg)
             if not sample:
                 self._skill_sync_dropped(pid)
@@ -1914,6 +1929,26 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                 from . import fleet as _fleet  # its Hermes bot stays, without the fleet note and the plugin in it
                 _fleet.untend_profile((st.get("hermes") or {}).get("profile"))
             self._drop_notes([pid])
+            if not sample:  # what the owner chose in its "What syncs" panel goes with it
+                try:
+                    from . import sync_panel as _sync_panel
+                    _sync_panel.forget_twin(pid)
+                except Exception:
+                    log.warning("grok-bot-twin: could not drop a removed twin's sync choices", exc_info=True)
+                try:  # and so do its session briefs (each file by its exact name) and their bookkeeping
+                    from . import briefs as _briefs
+                    _briefs.forget(pid)
+                except Exception:
+                    log.warning("grok-bot-twin: could not delete a removed twin's session briefs", exc_info=True)
+                # the fresh status may have lost the Hermes side (botport let go first): the registry still knows it
+                was = entry.get("hermes") if isinstance(entry, dict) else None
+                prof = (st.get("hermes") or {}).get("profile") or (was.get("profile") if isinstance(was, dict) else None)
+                if prof:
+                    try:  # its memory-facts ledger, restore points and Grok stand-in (MEMORY.md / USER.md stay)
+                        from . import mem_facts as _mem_facts
+                        _mem_facts.forget(prof)
+                    except Exception:
+                        log.warning("grok-bot-twin: could not drop a removed twin's memory-facts records", exc_info=True)
             self._checked.pop(pid, None)
             self.invalidate()
             watch.poke()  # with the last real twin gone, nothing is watched any more
@@ -2323,6 +2358,18 @@ def get_service() -> TwinService:
         if _service is None:
             _service = TwinService()
         return _service
+
+
+def _register_panel_rows() -> None:
+    """The "What syncs" panel's name, description and routines rows learn Hermes -> Grok (when the panel is there)."""
+    from .h2g_service import register_panel
+    try:
+        register_panel()
+    except Exception:  # the panel keeps its own default rows
+        logging.getLogger(__name__).debug("grok-bot-twin: Hermes -> Grok rows not registered", exc_info=True)
+
+
+_register_panel_rows()
 
 
 def reset_service() -> None:

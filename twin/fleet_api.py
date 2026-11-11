@@ -17,6 +17,7 @@ from . import fleet_server as server
 from . import fleet_skills as skills
 from . import store, tasks_run
 from . import xs_memory
+from . import mem_facts  # memory facts with Grok (0.3.0): plugs its row into the What syncs panel at import
 from .connect import BadInput
 from .model import now_dt, now_iso, parse_iso, plural
 

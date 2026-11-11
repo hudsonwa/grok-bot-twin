@@ -1,6 +1,6 @@
 name: grok-bot-twin
 label: Grok Bot Twin
-version: "0.2.1"
+version: "0.3.0"
 description: >-
   Give your Grok bots a twin in Hermes. A twin is a Hermes bot that follows a bot from the Grok desktop app;
   your Grok bot stays exactly as it is. Name and description changes reach the twin

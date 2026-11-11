@@ -24,6 +24,7 @@ DEFAULTS = {
     "share_port": 18777,
     "share_address": "",
     "machine_name": "",
+    "mirror_name": "",  # the Mirror bot's name in Grok, for the Auto-Review rule text (Hermes to Grok beta)
 }
 MIN_INTERVAL = 5
 MAX_INTERVAL = 86400
@@ -161,7 +162,7 @@ def settings() -> dict:
         out["share_port"] = port if 0 <= port <= 65535 else 18777
     except (TypeError, ValueError):
         pass
-    for key, cap in (("share_address", 45), ("machine_name", 40)):
+    for key, cap in (("share_address", 45), ("machine_name", 40), ("mirror_name", 60)):
         val = raw.get(key)
         if isinstance(val, str) and val.strip() and len(val.strip()) <= cap:
             out[key] = val.strip()

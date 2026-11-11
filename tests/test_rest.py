@@ -178,3 +178,18 @@ def test_secret_absent_from_rest(client):
     assert "looks like a password or key was not copied" in bodies[1]
     for b in bodies:
         assert key not in b
+
+
+def test_to_grok_changes_refused_inside_a_request_from_another_computer(client, monkeypatch):
+    """The page's own route is the owner's, but never the chat turn of a request from another computer."""
+    from hermes_plugins.grok_bot_twin.twin import tasks
+    client.post(P + "/demo", json={"action": "start"})
+    monkeypatch.setattr(tasks, "asked_turn", lambda *a, **k: True)
+    for action, body in (("allow", {"items": "all"}), ("apply", {"change_id": "c-0123456789abcdef"}),
+                         ("undo", {"change_id": "c-0123456789abcdef"}), ("resolve", {"item": "name", "keep": "hermes"}),
+                         ("runner", {"routine": "morning-digest", "to": "grok"}), ("give-up", {})):
+        r = client.post(P + f"/pairs/acme-support/to-grok/{action}", json=body).json()
+        assert r["error"]["code"] == "refused", action
+    monkeypatch.setattr(tasks, "asked_turn", lambda *a, **k: False)
+    assert client.post(P + "/pairs/acme-support/to-grok/allow", json={"items": "all"}).json()["allowed"]
+    assert client.post(P + "/to-grok/beta", json={"on": True}).status_code in (404, 405)  # no route turns the beta on

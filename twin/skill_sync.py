@@ -58,6 +58,9 @@ _AT_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\Z")
 _VER_RE = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}\Z")
 _NAME_OK_RE = re.compile(r"[A-Za-z0-9 ._\-+,()]{1,80}\Z")
 _HINT_OK_RE = re.compile(r"~/[A-Za-z0-9 ._\-/+,()]{1,300}\Z")
+_SKILL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")  # a skill folder name the box script accepts
+LIST_CAP = 60000  # the box script checks a signed list of at most 64 kB
+TAKE_CAP = 100  # skills made in Grok one twin can be given by name
 RESERVED = ("inbox", "status", "bin")
 LIST_STATES = ("ok", "none", "nokey", "nopython", "unsigned", "old")  # what the script made of the list of twins
 
@@ -160,7 +163,8 @@ NL='
 say() { printf '%s\n' "$*"; }
 die() { say "error: $*"; exit 2; }
 sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
-ok_name() { printf '%s' "$1" | grep -Eq '^[a-z0-9][a-z0-9._-]{0,63}$'; }
+ok_name() { case "$1" in ''|[!a-z0-9]*|*[!a-z0-9._-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
+ok_skill() { case "$1" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }
 ok_twin() { ok_name "$1" || return 1; case "$1" in inbox|status|bin) return 1 ;; esac; return 0; }
 
 do_install() {
@@ -243,6 +247,11 @@ apply_list() {
     if [ -f "$d/pair.key" ] && [ ! -L "$d/pair.key" ] && [ "$(sha "$d/pair.key")" = "$keysha" ]; then
       printf '%s\n' "$agent" > "$d/agent-id"
       [ -e "$d/pair-skills" ] || : > "$d/pair-skills"
+      # the skills made in Grok that the owner chose to bring to this twin ("# skills <twin> <name>..." in the list;
+      # "*" is every skill in the box's library): written afresh from each list taken, so a name taken off goes too
+      awk -v p="$pair" '$1 == "#" && $2 == "skills" && $3 == p { for (i = 4; i <= NF; i++) print $i }' "$W/pairs.ok" |
+        while IFS= read -r n; do if [ "$n" = "*" ] || ok_skill "$n"; then printf '%s\n' "$n"; fi; done > "$d/take-skills.new"
+      mv -f "$d/take-skills.new" "$d/take-skills"
       mkdir -p "$ROOT/$pair"
     else
       # the owner replaced this twin's pass: the old one no longer counts, and the twin waits for the new one
@@ -289,6 +298,34 @@ inbox() {
   apply_list "$L"
 }
 
+# The skills one twin may read back, one name a line: the newest install of each in its applied log (a skill it
+# retired is left out), then the owner's choice of skills made in Grok ("*": every skill in the box's library).
+read_names() {
+  {
+    if [ -f "$1applied.jsonl" ] && [ ! -L "$1applied.jsonl" ]; then
+      # (one JSON object a line, its keys in any order; the newest line of a skill wins)
+      awk '{
+        if (!match($0, /"item":"skill:[A-Za-z0-9][A-Za-z0-9._-]*"/)) next
+        n = substr($0, RSTART + 14, RLENGTH - 15); a = "-"
+        if (match($0, /"after":"[^"]*"/)) a = substr($0, RSTART + 9, RLENGTH - 10)
+        last[n] = a
+      } END { for (n in last) if (last[n] != "-") print n }' "$1applied.jsonl"
+    fi
+    if [ -f "$1take-skills" ] && [ ! -L "$1take-skills" ]; then
+      if grep -qx '[*]' "$1take-skills"; then library 100000; else cat "$1take-skills"; fi
+    fi
+  } | sort -u | while IFS= read -r n; do ok_skill "$n" && printf '%s\n' "$n"; done
+}
+
+# The names of the skills in the box's library (bots' own folders only), for the owner to choose from: names only.
+library() {
+  for s in "$AD"/workflows/*/; do
+    n=$(basename "$s")
+    case "$n" in managed-skills|plugin-skills) continue ;; esac
+    [ -f "$s/SKILL.md" ] && [ ! -L "${s%/}" ] && ok_skill "$n" && printf '%s\n' "$n"
+  done | head -n "$1"
+}
+
 do_run() {
   [ -x "$BP" ] || die "skill sync is not installed in this box yet"
   mkdir -p "$W" "$ROOT/inbox/keys" "$ROOT/status"
@@ -317,7 +354,31 @@ do_run() {
   done < "$W/stage.out"
   "$BP" mirror apply-pack --root "$ROOT" --agent-data "$AD" --check < /dev/null > /dev/null 2>&1
   chk=$?
-  "$BP" mirror digest-items --root "$ROOT" --agent-data "$AD" < /dev/null 2>&1 | grep -v '^details:' | sed 's/^/botport| /'
+  # The read-back, one twin at a time, from a copy of the box's files that holds only the skills this twin may read:
+  # those it installed (by name, also when a bot changed them in Grok since: botport then shows the change, or a
+  # conflict when Hermes changed it too) and those the owner chose to bring over. Never another bot's other skills.
+  for dd in "$W"/*/; do
+    [ -f "${dd}agent-id" ] && [ -f "${dd}pair.key" ] || continue
+    p=$(basename "$dd")
+    ok_twin "$p" || continue
+    aid=$(head -n 1 "${dd}agent-id")
+    printf '%s' "$aid" | grep -Eq '^[0-9a-f-]{36}$' || continue
+    [ -d "$AD/agents/$aid" ] && [ ! -L "$AD/agents/$aid" ] && [ -f "$AD/agents/$aid/profile.json" ] && [ ! -L "$AD/agents/$aid/profile.json" ] || { say "botport| $p: error: the box has no profile for this twin's bot"; continue; }
+    mkdir -p "$ROOT/$p/from-grok"
+    if [ -L "$ROOT/$p" ] || [ -L "$ROOT/$p/from-grok" ]; then say "botport| $p: error: its folder is a link: nothing read"; continue; fi
+    names=$(read_names "$dd")
+    # (the copy this script made for this twin on its last run, and only that folder, is replaced)
+    rm -rf -- "${W:?}/${p:?}/view"
+    V=$W/$p/view
+    mkdir -p "$V/agents/$aid" "$V/workflows" && cp "$AD/agents/$aid/profile.json" "$V/agents/$aid/profile.json" || continue
+    printf '%s\n' "$names" | while IFS= read -r n; do
+      [ -n "$n" ] && ok_skill "$n" || continue
+      [ -d "$AD/workflows/$n" ] && [ ! -L "$AD/workflows/$n" ] && [ -f "$AD/workflows/$n/SKILL.md" ] || continue
+      cp -RP "$AD/workflows/$n" "$V/workflows/$n"   # (links are copied as links, and botport reads none)
+    done
+    "$BP" mirror digest-items --pair "$p" --agent-id "$aid" --agent-data "$V" --with-skills --out "$ROOT/$p/from-grok" \
+      --log "${dd}applied.jsonl" --key "${dd}pair.key" < /dev/null 2>&1 | grep -v '^details:' | sed "s/^/botport| $p: /"
+  done
   at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   ver=$("$BP" --version 2>/dev/null | head -n 1 | sed -n 's/^[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | cut -c1-14)
   me=$(sha "$0")
@@ -365,17 +426,66 @@ do_run() {
       say "copy up: exports/$b"
     done
   fi
-  printf '{"form":1,"at":"%s","botport":"%s","script":"%s","check":%s,"list":"%s","serial":%s,"twins":[%s],"passes":{%s}}\n' \
-    "$at" "$ver" "$me" "$chk" "$LIST" "$ser" "$twins" "$passes" > "$ROOT/status/heartbeat.json.new"
+  lib=$(library 200 | awk '{ printf "%s\"%s\"", (NR > 1 ? "," : ""), $0 }')
+  nlib=$(library 100000 | wc -l | tr -d ' ')
+  case "$nlib" in ''|*[!0-9]*) nlib=0 ;; esac
+  printf '{"form":1,"at":"%s","botport":"%s","script":"%s","check":%s,"list":"%s","serial":%s,"twins":[%s],"passes":{%s},"skills":[%s],"skills_count":%s}\n' \
+    "$at" "$ver" "$me" "$chk" "$LIST" "$ser" "$twins" "$passes" "$lib" "$nlib" > "$ROOT/status/heartbeat.json.new"
   mv -f "$ROOT/status/heartbeat.json.new" "$ROOT/status/heartbeat.json"
   say "copy up: status/heartbeat.json"
   say "skill sync: ran at $at; botport $ver; check $chk"
 }
 
+# A change request from Hermes (to-grok/<id>.json): acted on only when its signature checks out with the inbox pass.
+# check: prints "change ok: <id> for bot <bot id> named "<name>", <n> change(s)" (exit 0) or "change refused: <why>" (exit 1);
+# the target bot must be in the request's signed list of bots the owner allowed in Hermes (never status/approved.json);
+# show: the same check, then prints the request's message for the target bot, unchanged.
+check_change() {
+  id=${1:-}
+  case "$id" in c-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+    *) say "change refused: not a change id"; exit 1 ;; esac
+  R=$ROOT/to-grok/$id.json
+  [ -f "$R" ] && [ ! -L "$R" ] && [ -f "$R.mac" ] && [ ! -L "$R.mac" ] || { say "change refused: $id is not in $ROOT/to-grok"; exit 1; }
+  [ -f "$W/inbox.key" ] || { say "change refused: this box has no inbox pass"; exit 1; }
+  command -v python3 >/dev/null 2>&1 || { say "change refused: this box has no python3 to check it"; exit 1; }
+  python3 -I - "$W/inbox.key" "$R" "$R.mac" "$id" "${2:-check}" <<'PY'
+import hashlib, hmac, json, sys
+try:
+    key = bytes.fromhex(open(sys.argv[1]).read().strip())
+    body = open(sys.argv[2], "rb").read(1048577)
+    mac = open(sys.argv[3]).read(200).strip()
+except Exception:
+    print("change refused: it could not be read"); sys.exit(1)
+want = hmac.new(key, b"grok-bot-twin-to-grok/1\n" + body, hashlib.sha256).hexdigest()
+if len(key) != 32 or len(body) > 1048576 or not hmac.compare_digest(mac, want):
+    print("change refused: it is not signed by the owner's computer"); sys.exit(1)
+req = json.loads(body)
+if req.get("id") != sys.argv[4]:
+    print("change refused: the file is not that change"); sys.exit(1)
+allowed = req.get("allowed") if isinstance(req.get("allowed"), list) else []
+if not isinstance(req.get("bot"), str) or not req["bot"] or req["bot"] not in allowed:
+    print("change refused: its bot is not one the owner allowed in Hermes"); sys.exit(1)
+import datetime
+try:
+    made = datetime.datetime.strptime(str(req.get("at"))[:19], "%Y-%m-%dT%H:%M:%S")
+except ValueError:
+    print("change refused: it has no time"); sys.exit(1)
+if (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - made).days >= 14:
+    print("change refused: it is older than 14 days"); sys.exit(1)
+if sys.argv[5] == "show":
+    sys.stdout.write(str(req.get("message") or "") + "\n")
+else:
+    name = " ".join(str(req.get("name") or "").replace('"', "'").split())[:100]
+    print('change ok: %s for bot %s named "%s", %d change(s)' % (req["id"], req.get("bot"), name, len(req.get("ops") or [])))
+PY
+}
+
 case "${1:-}" in
   install) do_install "${2:-}" ;;
   run) do_run ;;
-  *) die "usage: skill-sync-run.sh install DIR | run" ;;
+  check-change) check_change "${2:-}" check ;;
+  show-change) check_change "${2:-}" show ;;
+  *) die "usage: skill-sync-run.sh install DIR | run | check-change ID | show-change ID" ;;
 esac
 """
 
@@ -495,10 +605,21 @@ def load_state(central: Path) -> dict:
     twins = {p: a for p, a in list(twins.items())[:200]
              if isinstance(p, str) and _PAIR_RE.match(p) and isinstance(a, str) and _AGENT_RE.match(a)}
     via = raw.get("via") if isinstance(raw.get("via"), dict) else {}
+    take = raw.get("take") if isinstance(raw.get("take"), dict) else {}
     return {"root": root, "twins": twins,
             "via": {p: ("inbox" if via.get(p) == "inbox" else "kit") for p in twins},
+            "take": {p: t for p in twins if (t := _take_list(take.get(p)))},
             "serial": serial if isinstance(serial, int) and not isinstance(serial, bool) and 0 <= serial < 10 ** 12 else 0,
             "kit_at": raw.get("kit_at") if isinstance(raw.get("kit_at"), str) else None}
+
+
+def _take_list(value: Any) -> list:
+    """The owner's choice of skills made in Grok for one twin: ["*"] (every skill in the box's library) or names."""
+    if not isinstance(value, list):
+        return []
+    if "*" in value:
+        return ["*"]
+    return sorted({n for n in value if isinstance(n, str) and _SKILL_RE.match(n)})[:TAKE_CAP]
 
 
 def save_state(central: Path, state: dict) -> None:
@@ -531,10 +652,15 @@ def _pass_bytes(central: Path, pid: str) -> Optional[bytes]:
     return raw
 
 
-def pairs_text(twins: dict, hashes: dict, serial: int) -> str:
+def pairs_text(twins: dict, hashes: dict, serial: int, take: Optional[dict] = None) -> str:
     lines = ["# grok-bot-twin skill sync: the twins the sync bot serves (form 1)", f"# serial {serial}"]
     # (a bot id the box would not accept is still listed: the box says so in its run, and status() says so here)
     lines += [f"{p} {twins[p]} {hashes[p]}" for p in sorted(twins) if p in hashes]
+    # the skills made in Grok the owner chose to bring to each twin: a comment line, so an older script skips it
+    for p in sorted(twins):
+        names = _take_list((take or {}).get(p))
+        if p in hashes and names:
+            lines.append(f"# skills {p} {' '.join(names)}")
     return "\n".join(lines) + "\n"
 
 
@@ -546,7 +672,7 @@ def _signed_list(central: Path, state: dict) -> tuple[bytes, bytes, dict]:
     """(pairs.txt, pairs.txt.mac, {twin: its pass's bytes}) for the twins that still have a pass here."""
     passes = {p: b for p in state["twins"] if (b := _pass_bytes(central, p)) is not None}
     hashes = {p: hashlib.sha256(b).hexdigest() for p, b in passes.items()}
-    body = pairs_text(state["twins"], hashes, state["serial"]).encode("utf-8")
+    body = pairs_text(state["twins"], hashes, state["serial"], state.get("take")).encode("utf-8")
     return body, (sign(_inbox_key(central), body) + "\n").encode("ascii"), passes
 
 
@@ -668,7 +794,13 @@ def read_heartbeat(root: Optional[Path]) -> Optional[dict]:
             "list": data.get("list") if data.get("list") in LIST_STATES else None,
             "botport": ver if isinstance(ver, str) and _VER_RE.match(ver) else None,
             "script": script if isinstance(script, str) and _HEX64_RE.match(script) else None,
-            "twins": [t for t in twins[:200] if isinstance(t, str) and _PAIR_RE.match(t)]}
+            "twins": [t for t in twins[:200] if isinstance(t, str) and _PAIR_RE.match(t)],
+            # the names of the skills in the box's library (a script before 0.3.0 does not say: None)
+            "skills": (sorted({n for n in data["skills"][:200] if isinstance(n, str) and _SKILL_RE.match(n)})
+                       if isinstance(data.get("skills"), list) else None),
+            "skills_count": (data["skills_count"] if isinstance(data.get("skills_count"), int)
+                             and not isinstance(data.get("skills_count"), bool) and 0 <= data["skills_count"] < 10 ** 6
+                             else None)}
 
 
 def ago_text(minutes: int) -> str:
@@ -696,7 +828,9 @@ def status(central: Path, pid: str, connected: bool, tag: str, now: Optional[dat
     out = {"pair_id": pid, "connected": connected, "set_up": root is not None,
            "folder_name": root.name[:80] if root is not None else "", "served": False, "last_run_at": None,
            "minutes_ago": None, "heartbeat": NOT_RUN,
-           "box": {"version": None, "need": need, "ok": None, "note": ""}, "credit_note": CREDIT_NOTE}
+           "box": {"version": None, "need": need, "ok": None, "note": ""}, "credit_note": CREDIT_NOTE,
+           "grok_skills": {"taken": state["take"].get(pid, []), "library": None, "count": None, "offered": [],
+                           "note": ""}}
     box = out["box"]
     mine = _pass_bytes(central, pid)
     fixed = ""  # something no run of the sync bot can put right
@@ -714,6 +848,8 @@ def status(central: Path, pid: str, connected: bool, tag: str, now: Optional[dat
     held = beat["passes"].get(pid)
     served = pid in beat["twins"] and mine is not None and held == hashlib.sha256(mine).hexdigest()[:16]
     out.update(served=served, last_run_at=beat["at_text"], minutes_ago=minutes, heartbeat=ago_text(minutes))
+    out["grok_skills"]["library"] = beat["skills"]
+    out["grok_skills"]["count"] = beat["skills_count"]
     box["version"] = beat["botport"]
     again = "Send it the set-up folder again (step 3)"
     if fixed:
@@ -741,6 +877,28 @@ def status(central: Path, pid: str, connected: bool, tag: str, now: Optional[dat
         # the sync bot holds this twin's current pass: a copy still waiting in the inbox goes (that one file)
         _unlink_file(root, f"inbox/keys/{pid}.key")
     return out
+
+
+def offer(out: dict, in_hermes: set) -> None:
+    """Skills in the box's library that neither come back to this twin nor are in Hermes: named, never silent."""
+    gs = out["grok_skills"]
+    lib, taken = gs["library"], gs["taken"]
+    if lib is None:
+        if taken and out["last_run_at"]:
+            gs["note"] = ("The sync bot runs an older script that does not bring skills made in Grok back. Send it "
+                          "the set-up folder again (step 3).")
+        return
+    if taken == ["*"]:
+        return
+    gs["offered"] = [n for n in lib if n not in taken and n not in in_hermes]
+    more = max(0, (gs.get("count") or 0) - len(lib))  # names the heartbeat had no room for
+    if gs["offered"] or more:
+        shown = ", ".join(gs["offered"][:8])
+        extra = len(gs["offered"]) - 8 + more if len(gs["offered"]) > 8 else more
+        if extra:
+            shown += f" and {extra} more" if shown else f"{extra} more than the sync bot listed"
+        gs["note"] = (f"Grok has skills this twin does not get: {shown}. To bring one to Hermes: "
+                      f"hermes twin skill-sync {out['pair_id']} --take NAME (or --take-all).")
 
 
 # ---- adding and dropping a twin ------------------------------------------------------------------------------------
@@ -776,7 +934,7 @@ def remember(central: Path, root: Path, pid: str, agent: str) -> tuple[dict, str
         if others and _real_dir(Path(state["root"])):
             raise SkillSyncProblem(f'Skill sync already uses the folder "{Path(state["root"]).name[:80]}" for your '
                                    "other twins. Use that folder, or turn skill sync off for them first.")
-        state = {"root": str(root), "twins": {}, "via": {}, "serial": state["serial"], "kit_at": None}
+        state = {"root": str(root), "twins": {}, "via": {}, "take": {}, "serial": state["serial"], "kit_at": None}
     if pid not in state["twins"]:
         ran = state["kit_at"] is not None and read_heartbeat(root) is not None
         state["via"][pid] = "inbox" if ran else "kit"
@@ -793,13 +951,55 @@ def rekeyed(central: Path, pid: str) -> None:
     state["serial"] = max(state["serial"] + 1, int(datetime.now(timezone.utc).timestamp()))
     save_state(central, state)
     write_inbox(central, state, drops=(pid,))
+    _refresh_kit(central, state, pid)
+
+
+def _refresh_kit(central: Path, state: dict, pid: Optional[str] = None) -> None:
     kit = kit_dir(central)
-    if _real_dir(kit):  # the set-up folder, if it is sent after this, names and holds the new pass too
+    if _real_dir(kit):  # the set-up folder, if it is sent after this, holds the same list (and the twin's new pass)
         body, mac, passes = _signed_list(central, state)
         _put(kit, "pairs.txt", body)
         _put(kit, "pairs.txt.mac", mac)
-        if pid in passes:
+        if pid is not None and pid in passes:
             _put(kit, f"{pid}.key", passes[pid])
+
+
+def take(central: Path, pid: str, add: tuple = (), remove: tuple = (), every: Optional[bool] = None) -> list:
+    """The owner chose which skills made in Grok come back to this twin: names to add or take off, or every skill
+    in the box's library (every=True) or none of those (every=False). The signed list carries the choice to the sync
+    bot on its next run. -> the choice now."""
+    state = load_state(central)
+    if pid not in state["twins"]:
+        raise SkillSyncProblem("Skill sync is off for this twin. Turn it on first: hermes twin skill-sync --folder DIR")
+    bad = [n for n in (*add, *remove) if not isinstance(n, str) or not _SKILL_RE.match(n)]
+    if bad:
+        raise SkillSyncProblem("A skill's name is its folder's name in Grok: letters, digits, dots, dashes and "
+                               "underscores, at most 64 characters.")
+    now = state["take"].get(pid, [])
+    if every is True:
+        now = ["*"]
+    elif every is False:
+        now = []
+    if now == ["*"] and (remove or add):
+        raise SkillSyncProblem("Every skill made in Grok comes back to this twin already. To choose by name, take that "
+                               "back first: --take-none")
+    if now != ["*"]:
+        names = (set(now) | set(add)) - set(remove)
+        if len(names) > TAKE_CAP:
+            raise SkillSyncProblem(f"At most {TAKE_CAP} skills can be chosen by name. Use --take-all instead.")
+        now = sorted(names)
+    state["take"][pid] = now
+    if not now:
+        state["take"].pop(pid)
+    if len(_signed_list(central, state)[0]) > LIST_CAP:
+        raise SkillSyncProblem("That is more than the sync bot's list can carry. Choose fewer skills by name, or use "
+                               "--take-all.")
+    state["serial"] = max(state["serial"] + 1, int(datetime.now(timezone.utc).timestamp()))
+    save_state(central, state)
+    if shared_root(central) is not None:
+        write_inbox(central, state)
+    _refresh_kit(central, state)
+    return now
 
 
 def drop(central: Path, pid: str) -> None:
@@ -810,6 +1010,7 @@ def drop(central: Path, pid: str) -> None:
         return
     del state["twins"][pid]
     state["via"].pop(pid, None)
+    state["take"].pop(pid, None)
     state["serial"] = max(state["serial"] + 1, int(datetime.now(timezone.utc).timestamp()))
     save_state(central, state)
     root = shared_root(central)
@@ -832,7 +1033,7 @@ def close_all(central: Path) -> None:
         return
     for pid in list(state["twins"]):
         _unlink_file(root, f"inbox/keys/{pid}.key")
-    state["twins"], state["via"] = {}, {}
+    state["twins"], state["via"], state["take"] = {}, {}, {}
     state["serial"] = max(state["serial"] + 1, int(datetime.now(timezone.utc).timestamp()))
     write_inbox(central, state)
 
@@ -871,7 +1072,40 @@ class SkillSyncMixin:
             out = status(self.central / "no-sample-folder", pid, connected, self._skill_sync_tag())
             out.update(set_up=False, folder_name="", heartbeat=SAMPLE_BEAT)
             return out
-        return status(self.central, pid, connected, self._skill_sync_tag())
+        out = status(self.central, pid, connected, self._skill_sync_tag())
+        offer(out, self._hermes_skill_names(pair))
+        return out
+
+    def _hermes_skill_names(self, pair: dict) -> set:
+        """The twin's skills in Hermes, by folder name (any category): a skill Hermes has is never offered as one
+        made in Grok."""
+        prof = (pair.get("hermes") or {}).get("profile")
+        if not isinstance(prof, str) or not prof or "/" in prof or "\\" in prof or prof.startswith("."):
+            return set()
+        base = store.profile_home(prof) / "skills"
+        try:
+            return {d.parent.name for d in base.glob("*/*/SKILL.md")} | {d.parent.name for d in base.glob("*/SKILL.md")}
+        except OSError:
+            return set()
+
+    def skill_sync_take(self, pid: Any, add: Any = (), remove: Any = (), every: Any = None) -> dict:
+        """Which skills made in Grok come back to this twin (see take())."""
+        from .connect import BadInput
+        pid = self.require_pair(pid)
+        if not (isinstance(add, (list, tuple)) and isinstance(remove, (list, tuple)) and every in (None, True, False)):
+            raise BadInput("That request was not understood.")
+        if pid in self.demo.pair_ids():
+            raise BadInput("The sample has no sync bot.")
+        try:
+            with store.locked():
+                take(self.central, pid, tuple(add), tuple(remove), every)
+        except SkillSyncProblem as exc:
+            raise BadInput(str(exc))
+        except OSError:
+            raise BadInput("Hermes could not write to the shared folder.")
+        self.invalidate()
+        self.emit("mirror", pid, {"take": True})
+        return self.skill_sync_status(pid)
 
     def skill_sync_setup(self, pid: Any, folder: Any = None, remake: Any = False) -> dict:
         """Turn skill sync on for one twin. The first twin gets the set-up folder and the texts to paste; a later

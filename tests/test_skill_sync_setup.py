@@ -356,7 +356,7 @@ def test_heartbeat_says_when_skill_sync_last_ran_and_which_botport_the_sync_bot_
     beat()
     st = fake.svc.skill_sync_status("acme-support")
     assert set(st) == {"pair_id", "connected", "set_up", "folder_name", "served", "last_run_at", "minutes_ago",
-                       "heartbeat", "box", "credit_note"}
+                       "heartbeat", "box", "credit_note", "grok_skills"}
     assert st["heartbeat"].startswith("Skill sync last ran ") and st["heartbeat"].endswith(" days ago")
     assert st["folder_name"] == "Shared Skills" and st["credit_note"] == SS.CREDIT_NOTE
 
@@ -725,8 +725,12 @@ def test_box_script_names_no_link_and_no_two_line_name_to_copy_up(home, tmp_path
 
 def test_box_script_and_texts_hold_no_command_that_could_harm(home):
     script = SS.BOX_SCRIPT
-    assert "rm -" not in script and "curl" not in script and "wget" not in script and "eval" not in script
-    assert "--coverage complete" not in script and "with-skills" not in script
+    # one removal only: the copy of the box's files the script made for a twin on its last run
+    assert [x.strip() for x in script.splitlines() if "rm " in x] == ['rm -rf -- "${W:?}/${p:?}/view"']
+    assert "curl" not in script and "wget" not in script and "eval" not in script
+    # the box's whole skills library is never read for a twin: only a copy holding that twin's own and chosen skills
+    assert "--coverage complete" not in script and script.count("--with-skills") == 1
+    assert '--agent-data "$V" --with-skills' in script and "with-skills\n" not in script
     assert script.count("--install-to") == 1 and "python3 -I -" in script
     for text in (SS.ROUTINE_PROMPT, SS.install_message(SS.script_sha256()), SS.instructions("", "Shared Skills", "")):
         assert "rm -" not in text and "sudo" not in text
@@ -738,10 +742,9 @@ real = pytest.mark.skipif(not (BIN and os.path.isfile(BIN) and os.access(BIN, os
                           reason="set BOTPORT_TEST_BIN to a botport build to run this")
 
 
-@real
-@needs_shell
-def test_real_botport_a_hermes_skill_is_installed_in_the_box_and_a_second_twin_joins_without_a_chat(
-        home, tmp_path, monkeypatch):
+def _real_loop(home, tmp_path, monkeypatch):
+    """The whole skill sync loop with a real botport: two invented twins, a pretend box with this computer's botport
+    under the box's file name, skill sync set up for Acme Helper, and a Hermes skill installed in the box."""
     os.chmod(tmp_path, 0o700)
     sand = tmp_path / "user-home"
     (sand / "Downloads").mkdir(parents=True, mode=0o700)
@@ -815,6 +818,16 @@ def test_real_botport_a_hermes_skill_is_installed_in_the_box_and_a_second_twin_j
     assert "WAVE-OK" in (box.data / "workflows" / "wave-hello" / "SKILL.md").read_text()
     names = box.copy_up(shared, text)
     assert "status/heartbeat.json" in names and any(n.startswith(f"{acme}/from-grok/state-") for n in names)
+    return svc, box, shared, acme, recipe, skill, text
+
+
+@real
+@needs_shell
+def test_real_botport_a_hermes_skill_is_installed_in_the_box_and_a_second_twin_joins_without_a_chat(
+        home, tmp_path, monkeypatch):
+    svc, box, shared, acme, recipe, skill, text = _real_loop(home, tmp_path, monkeypatch)
+    names = [x[len("copy up: "):] for x in text.splitlines() if x.startswith("copy up: ")]
+    sand = tmp_path / "user-home"
     # back on the owner's computer: in step, and the page can say when the sync bot last ran and what it runs
     entry = next(p for p in svc.sync(acme)["pairs"] if p["pair_id"] == acme)
     assert entry["state"] == "in_step", entry
@@ -835,3 +848,264 @@ def test_real_botport_a_hermes_skill_is_installed_in_the_box_and_a_second_twin_j
                [str(p.relative_to(shared)) for p in shared.rglob("state-*.json")])
     # nothing here touched this computer's real folders: every botport state file is under tmp_path
     assert not list(sand.rglob("mirror-apply-pack.json")) and (box.root / ".work" / "mirror-apply-pack.json").exists()
+
+
+def _box_round(svc, box, shared, pid):
+    """One run of the sync bot (copy down, run, copy up), then Hermes takes in what came back."""
+    box.copy_down(shared)
+    rc, text = box.run()
+    assert rc == 0 and "error" not in text.lower(), text
+    box.copy_up(shared, text)
+    return text, next(p for p in svc.sync(pid)["pairs"] if p["pair_id"] == pid)
+
+
+@real
+@needs_shell
+def test_real_botport_grok_side_skill_changes_come_back_to_hermes_never_silently(home, tmp_path, monkeypatch):
+    """A Grok-side edit of a skill Hermes sent comes back (applied when only Grok changed it, a
+    conflict when Hermes changed it too), and a skill made in Grok comes back only once the owner chose it."""
+    svc, box, shared, acme, recipe, skill, text = _real_loop(home, tmp_path, monkeypatch)
+    assert next(p for p in svc.sync(acme)["pairs"] if p["pair_id"] == acme)["state"] == "in_step"
+    installed = box.data / "workflows" / "wave-hello" / "SKILL.md"
+    # (a) a bot in Grok adds a step to the skill Hermes sent (and reformats its front matter, as some bots do)
+    installed.write_text(installed.read_text().replace("description: Waves hello to visitors.",
+                                                       "description: >-\n  Waves hello to visitors.")
+                         + "Step 4: wave twice. GROK-EDIT-1\n")
+    text, entry = _box_round(svc, box, shared, acme)
+    # only the skill this twin installed went into the copy botport read, never the rest of the box
+    view = box.root / ".work" / acme / "view"
+    assert sorted(p.name for p in (view / "workflows").iterdir()) == ["wave-hello"]
+    assert entry["applied"] and "skill:wave-hello" in json.dumps(entry["applied"]), entry
+    assert "GROK-EDIT-1" in (skill / "SKILL.md").read_text() and entry["conflicts"] == []
+    assert entry["state"] == "in_step", entry
+    # a run with nothing new changes nothing in Hermes
+    _, entry = _box_round(svc, box, shared, acme)
+    assert entry["applied"] == [] and entry["conflicts"] == [] and entry["state"] == "in_step", entry
+    # (b) changed in both places: a conflict for the owner to settle, neither copy is overwritten
+    installed.write_text(installed.read_text() + "Step 5: bow. GROK-EDIT-2\n")
+    (skill / "SKILL.md").write_text((skill / "SKILL.md").read_text() + "Step 5: smile. HERMES-EDIT-2\n")
+    _, entry = _box_round(svc, box, shared, acme)
+    assert "skill:wave-hello" in json.dumps(entry["conflicts"]), entry
+    assert "HERMES-EDIT-2" in (skill / "SKILL.md").read_text() and "GROK-EDIT-2" not in (skill / "SKILL.md").read_text()
+    assert "GROK-EDIT-2" in installed.read_text() and "HERMES-EDIT-2" not in installed.read_text()
+    svc.resolve(acme, "skill:wave-hello", "grok")
+    assert "GROK-EDIT-2" in (skill / "SKILL.md").read_text()
+    # (a) a skill a bot made in Grok's shared library: named to the owner, never brought over unasked
+    made = box.data / "workflows" / "example-skill"
+    made.mkdir()
+    (made / "SKILL.md").write_text("---\nname: example-skill\ndescription: Says hello.\n---\n"
+                                   "Say hello. EXAMPLE-OK\n")
+    other = box.data / "workflows" / "recipe-ideas"  # another bot's: never read for this twin unless chosen
+    other.mkdir()
+    (other / "SKILL.md").write_text("---\nname: recipe-ideas\ndescription: Ideas.\n---\nSuggest a dish.\n")
+    _, entry = _box_round(svc, box, shared, acme)
+    prof = skill.parent
+    assert not (prof / "example-skill").exists() and not (prof / "recipe-ideas").exists()
+    st = svc.skill_sync_status(acme)
+    gs = st["grok_skills"]
+    assert gs["library"] == ["recipe-ideas", "example-skill", "wave-hello"] and gs["taken"] == []
+    assert gs["offered"] == ["recipe-ideas", "example-skill"]
+    assert gs["note"] == ("Grok has skills this twin does not get: recipe-ideas, example-skill. To bring one to "
+                          f"Hermes: hermes twin skill-sync {acme} --take NAME (or --take-all).")
+    st = svc.skill_sync_take(acme, ["example-skill"])
+    assert st["grok_skills"]["taken"] == ["example-skill"]
+    assert f"# skills {acme} example-skill" in (shared / "inbox" / "pairs.txt").read_text()
+    _, entry = _box_round(svc, box, shared, acme)
+    assert sorted(p.name for p in (view / "workflows").iterdir()) == ["example-skill", "wave-hello"]
+    # a new skill from Grok waits for the owner's approval in Hermes before it is used
+    assert entry["waiting"] == [{"item": "skill:example-skill", "reason": "needs_approval", "to": None,
+                                 "detail": "a new skill"}] and entry["state"] == "needs_you", entry
+    assert not list(skill.parent.parent.rglob("example-skill"))
+    svc.approve(acme, "skill:example-skill")
+    got = list(skill.parent.parent.rglob("example-skill/SKILL.md"))
+    assert got and "EXAMPLE-OK" in got[0].read_text()
+    assert not list(skill.parent.parent.rglob("recipe-ideas"))
+    assert svc.skill_sync_status(acme)["grok_skills"]["offered"] == ["recipe-ideas"]
+    # taken back: no longer read; what Hermes already has stays (a partial read is never a removal)
+    svc.skill_sync_take(acme, remove=["example-skill"])
+    assert "# skills" not in (shared / "inbox" / "pairs.txt").read_text()
+    _, entry = _box_round(svc, box, shared, acme)
+    assert sorted(p.name for p in (view / "workflows").iterdir()) == ["wave-hello"]
+    assert entry["conflicts"] == [], entry
+
+
+@needs_shell
+@pytest.mark.parametrize("shell", SHELLS)
+def test_box_script_reads_back_only_this_twins_skills_and_the_ones_the_owner_chose(home, tmp_path, shell):
+    box = Box(tmp_path, STANDIN.encode(), shell)
+    key = _kit_for_box(box, central(home), {"acme-helper": ACME_BOX_ID}, {"acme-helper": PASS})
+    assert box.sh(box.kit / "skill-sync-run.sh", "install", str(box.kit))[0] == 0
+    for n in ("wave-hello", "old-trick", "example-skill", "recipe-ideas"):
+        (box.data / "workflows" / n).mkdir()
+        (box.data / "workflows" / n / "SKILL.md").write_text(f"---\nname: {n}\n---\n{n}\n")
+    (box.data / "workflows" / "no-skill-file").mkdir()
+    (box.data / "workflows" / "managed-skills" / "x").mkdir(parents=True)
+    (box.data / "workflows" / "managed-skills" / "x" / "SKILL.md").write_text("x")
+    work = box.root / ".work" / "acme-helper"
+    # botport's applied log (keys in any order): wave-hello installed (then changed in Grok: still this twin's), and
+    # old-trick installed and later retired
+    (work / "applied.jsonl").write_text(
+        '{"after":"' + "a" * 64 + '","before":"-","gen":1,"item":"skill:wave-hello"}\n'
+        '{"gen":1,"item":"skill:old-trick","before":"-","after":"' + "b" * 64 + '"}\n'
+        '{"after":"-","before":"' + "b" * 64 + '","gen":2,"item":"skill:old-trick"}\n')
+    view = work / "view" / "workflows"
+
+    def put_list(take):
+        body = SS.pairs_text({"acme-helper": ACME_BOX_ID}, {"acme-helper": hashlib.sha256(PASS.encode()).hexdigest()},
+                             int(datetime.now(timezone.utc).timestamp()), take).encode()
+        (box.root / "inbox" / "pairs.txt").write_bytes(body)
+        (box.root / "inbox" / "pairs.txt.mac").write_text(SS.sign(key, body) + "\n")
+
+    rc, out = box.run()
+    assert rc == 0, out
+    assert sorted(p.name for p in view.iterdir()) == ["wave-hello"]
+    assert (work / "view" / "agents" / ACME_BOX_ID / "profile.json").is_file()
+    calls = (box.base / "calls.log").read_text().splitlines()
+    assert (f"mirror digest-items --pair acme-helper --agent-id {ACME_BOX_ID} --agent-data {work}/view --with-skills "
+            f"--out {box.root}/acme-helper/from-grok --log {work}/applied.jsonl --key {work}/pair.key") in calls
+    assert not any("digest-items" in c and str(box.data) in c for c in calls)  # never the whole library
+    beat = SS.read_heartbeat(box.root)
+    assert beat["skills"] == ["example-skill", "old-trick", "recipe-ideas", "wave-hello"]
+    # the owner chose one skill made in Grok (and a name that is not one): only that one comes back as well
+    put_list({"acme-helper": ["example-skill"]})
+    rc, out = box.run()
+    assert sorted(p.name for p in view.iterdir()) == ["example-skill", "wave-hello"]
+    assert (work / "take-skills").read_text() == "example-skill\n"
+    # a list with the choice in it that is not signed by the owner's computer changes nothing
+    body = (box.root / "inbox" / "pairs.txt").read_bytes().replace(b"example-skill", b"recipe-ideas")
+    (box.root / "inbox" / "pairs.txt").write_bytes(body)
+    rc, out = box.run()
+    assert "is not signed by the owner's computer" in out
+    assert sorted(p.name for p in view.iterdir()) == ["example-skill", "wave-hello"]
+    # every skill in the library
+    put_list({"acme-helper": ["*"]})
+    rc, out = box.run()
+    assert sorted(p.name for p in view.iterdir()) == ["example-skill", "old-trick", "recipe-ideas", "wave-hello"]
+    # the choice taken back: the next run reads this twin's own skills only
+    put_list({})
+    rc, out = box.run()
+    assert sorted(p.name for p in view.iterdir()) == ["wave-hello"] and (work / "take-skills").read_text() == ""
+    # a link in the library is never followed into the copy, and a twin with no profile in the box is said
+    (box.data / "workflows" / "linked").symlink_to(box.data / "workflows" / "wave-hello")
+    put_list({"acme-helper": ["*"]})
+    rc, out = box.run()
+    assert "linked" not in [p.name for p in view.iterdir()] and "linked" not in SS.read_heartbeat(box.root)["skills"]
+    (box.data / "agents" / ACME_BOX_ID / "profile.json").rename(box.base / "profile.json")
+    rc, out = box.run()
+    assert "botport| acme-helper: error: the box has no profile for this twin's bot" in out
+    (box.base / "profile.json").rename(box.data / "agents" / ACME_BOX_ID / "profile.json")
+    # a folder name a bot made to break the heartbeat (a line break, then JSON) is no skill name: never written
+    evil = 'zz\n"],"passes":{"acme-helper":"0000000000000000"},"script":"' + "a" * 64 + '","skills":["y'
+    (box.data / "workflows" / evil).mkdir()
+    (box.data / "workflows" / evil / "SKILL.md").write_text("x")
+    (box.data / "workflows" / "Demo-Skill").mkdir()  # capitals are a skill name botport takes
+    (box.data / "workflows" / "Demo-Skill" / "SKILL.md").write_text("---\nname: Demo-Skill\n---\nx\n")
+    rc, out = box.run()
+    raw = (box.root / "status" / "heartbeat.json").read_text()
+    assert raw.count("\n") == 1 and '"passes":{"acme-helper":"' + _h16(PASS) + '"}' in raw
+    beat = SS.read_heartbeat(box.root)
+    assert beat["passes"] == {"acme-helper": _h16(PASS)} and beat["script"] == SS.script_sha256()
+    assert "Demo-Skill" in beat["skills"] and "Demo-Skill" in [p.name for p in view.iterdir()]
+    assert beat["skills_count"] == len(beat["skills"]) == 5
+    # a twin folder that is a link is never written through
+    put_list({})
+    (box.root / "acme-helper" / "from-grok").rename(box.base / "moved")
+    (box.root / "acme-helper" / "from-grok").symlink_to(box.base / "moved")
+    rc, out = box.run()
+    assert "botport| acme-helper: error: its folder is a link: nothing read" in out
+
+
+def test_the_owners_choice_of_grok_skills_travels_signed_and_is_named_when_not_chosen(fake, capsys, monkeypatch):
+    c = fake.central
+    fake.svc.skill_sync_setup("acme-support", str(fake.shared))
+    st = fake.svc.skill_sync_status("acme-support")
+    assert st["grok_skills"] == {"taken": [], "library": None, "count": None, "offered": [], "note": ""}
+    st = fake.svc.skill_sync_take("acme-support", ["example-skill", "demo-skill.v2"])
+    assert st["grok_skills"]["taken"] == ["demo-skill.v2", "example-skill"]
+    body = (fake.shared / "inbox" / "pairs.txt").read_bytes()
+    assert b"\n# skills acme-support demo-skill.v2 example-skill\n" in body
+    key = bytes.fromhex((c / "skill-sync" / "inbox.key").read_text().strip())
+    assert (fake.shared / "inbox" / "pairs.txt.mac").read_text().strip() == SS.sign(key, body)
+    kit = c / "skill-sync" / "skill-sync-kit"
+    assert (kit / "pairs.txt").read_bytes() == body  # a set-up folder sent later carries the same choice
+    for bad in (["../x"], ["a b"], ["x" * 65], [""], ["a\nb"]):
+        with pytest.raises(Exception) as ei:
+            fake.svc.skill_sync_take("acme-support", bad)
+        assert "folder's name in Grok" in str(ei.value)
+    assert fake.svc.skill_sync_take("acme-support", remove=["demo-skill.v2"])["grok_skills"]["taken"] == ["example-skill"]
+    assert fake.svc.skill_sync_take("acme-support", every=True)["grok_skills"]["taken"] == ["*"]
+    assert b"# skills acme-support *\n" in (fake.shared / "inbox" / "pairs.txt").read_bytes()
+    with pytest.raises(Exception) as ei:
+        fake.svc.skill_sync_take("acme-support", remove=["example-skill"])
+    assert "--take-none" in str(ei.value)
+    assert fake.svc.skill_sync_take("acme-support", every=False)["grok_skills"]["taken"] == []
+    assert b"# skills" not in (fake.shared / "inbox" / "pairs.txt").read_bytes()
+    with pytest.raises(Exception):
+        fake.svc.skill_sync_take("acme-support", "example-skill")  # one string is not a list of names
+    # the heartbeat names the library: what neither comes back nor is in Hermes is named, never silent
+    beat = {"form": 1, "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "botport": TAG[1:],
+            "script": SS.script_sha256(), "check": 0, "list": "ok", "serial": 1, "twins": ["acme-support"],
+            "passes": {}, "skills": ["example-skill", "Bad Name", 7, "wave-hello"]}
+    (fake.shared / "status").mkdir(exist_ok=True)
+    (fake.shared / "status" / "heartbeat.json").write_text(json.dumps(beat))
+    gs = fake.svc.skill_sync_status("acme-support")["grok_skills"]
+    assert gs["library"] == ["example-skill", "wave-hello"] and gs["offered"] == ["example-skill", "wave-hello"]
+    assert gs["note"].startswith("Grok has skills this twin does not get: example-skill, wave-hello. To bring one")
+    from hermes_plugins.grok_bot_twin.twin import cli
+    assert cli.main(["skill-sync", "acme-support", "--take", "example-skill"]) == 0
+    assert "these skills made in Grok come back to this twin: example-skill." in capsys.readouterr().out
+    gs = fake.svc.skill_sync_status("acme-support")["grok_skills"]
+    assert gs["offered"] == ["wave-hello"] and gs["note"].startswith("Grok has skills this twin does not get: wave-hello.")
+    real_status = fake.svc.skill_sync_status
+    monkeypatch.setattr(fake.svc, "skill_sync_status", lambda pid: dict(real_status(pid), connected=True))
+    assert cli.main(["skill-sync", "acme-support", "--status"]) == 0
+    out = capsys.readouterr().out
+    assert "Skills made in Grok that come back here: example-skill." in out and "--take NAME" in out
+    # an older script in the box says no names: a choice it cannot carry is said
+    beat.pop("skills")
+    (fake.shared / "status" / "heartbeat.json").write_text(json.dumps(beat))
+    gs = fake.svc.skill_sync_status("acme-support")["grok_skills"]
+    assert gs["library"] is None and gs["note"].startswith("The sync bot runs an older script that does not bring")
+    # more names than the heartbeat lists are counted and said
+    beat["skills"], beat["skills_count"] = ["example-skill"], 100
+    (fake.shared / "status" / "heartbeat.json").write_text(json.dumps(beat))
+    assert ("Grok has skills this twin does not get: 99 more than the sync bot listed."
+            in fake.svc.skill_sync_status("acme-support")["grok_skills"]["note"])
+    # a choice the box could not take (the signed list would pass 64 kB) is refused before anything changes
+    monkeypatch.setattr(SS, "LIST_CAP", 300)
+    with pytest.raises(Exception) as ei:
+        fake.svc.skill_sync_take("acme-support", ["x" * 60, "y" * 60, "z" * 60])
+    assert "more than the sync bot's list can carry" in str(ei.value)
+    assert SS.load_state(c)["take"]["acme-support"] == ["example-skill"]
+    monkeypatch.setattr(SS, "LIST_CAP", 60000)
+    assert fake.svc.skill_sync_take("acme-support", ["Demo-Skill"])["grok_skills"]["taken"] == ["Demo-Skill", "example-skill"]
+    # --take is never dropped silently next to another action
+    capsys.readouterr()
+    assert cli.main(["skill-sync", "acme-support", "--off", "--take", "x"]) != 0
+    said = capsys.readouterr()
+    assert "without --off" in said.out + said.err
+    assert SS.load_state(c)["take"]["acme-support"] == ["Demo-Skill", "example-skill"]
+    # turning skill sync off forgets the choice
+    SS.drop(c, "acme-support")
+    assert "acme-support" not in SS.load_state(c)["take"]
+
+
+def test_rest_route_for_the_choice_of_grok_skills(fake):
+    pytest.importorskip("fastapi")
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gbt_plugin_api_g2h", ROOT / "dashboard" / "plugin_api.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    app = FastAPI()
+    app.include_router(mod.router, prefix="/api/plugins/grok-bot-twin")
+    c = TestClient(app)
+    fake.svc.skill_sync_setup("acme-support", str(fake.shared))
+    base = "/api/plugins/grok-bot-twin/pairs/acme-support/skill-sync/take"
+    r = c.post(base, json={"add": ["example-skill"]})
+    assert r.status_code == 200 and r.json()["grok_skills"]["taken"] == ["example-skill"]
+    assert c.post(base, json={"every": True}).json()["grok_skills"]["taken"] == ["*"]
+    r = c.post(base, json={"add": ["../x"]})
+    assert "folder's name in Grok" in r.json()["error"]["message"]
+    assert "error" in c.post(base, json={"add": "example-skill"}).json()

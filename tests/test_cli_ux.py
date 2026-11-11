@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -109,7 +110,7 @@ def test_help_is_grouped_in_three(svc):
         assert f"\n  {cmd}" in everyday, cmd
     for cmd in ("conflicts", "resolve", "versions", "restore", "doctor", "setup"):
         assert f"\n  {cmd}" in fix, cmd
-    for cmd in ("check", "list-grok", "recent", "compare", "checklist", "switch", "approve", "skip", "send-to-grok",
+    for cmd in ("check", "list-grok", "recent", "compare", "syncs", "checklist", "switch", "approve", "skip", "send-to-grok",
                 "skill-sync", "digest", "verify", "demo", "uninstall"):
         assert f"\n  {cmd}" in advanced, cmd
     # the older names still work but are not in the overview (words nobody needs)
@@ -119,7 +120,8 @@ def test_help_is_grouped_in_three(svc):
     assert 'TWIN is a twin\'s name, such as "Acme Support" (shown by status).' in text
     # the page's words: Check now is "check" (sync still works, unlisted); a version is put back by its number;
     # "link" is for computers, so Remove speaks of twins and their records
-    assert "\n  sync" not in text and "restore [TWIN] NUMBER" in text and " ID " not in text
+    # ("syncs", the What syncs panel, is a command of its own)
+    assert not re.search(r"\n  sync\b", text) and "restore [TWIN] NUMBER" in text and " ID " not in text
     assert "every twin and its records" in text and "twin link" not in text
     assert "gh attestation verify" not in text and "helper" not in text and "key file" not in text
     assert "{status," not in text  # no flat list of 21 commands

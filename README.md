@@ -243,7 +243,14 @@ instructions and the switched-off routines stay in the Hermes bot, which is your
 ## What copies over, honestly
 
 One table says it all. The Twins page shows the same one (a twin's **…** menu, **Details…**, **The whole
-table**), and so does `hermes twin copies` in a terminal.
+table**), and so does `hermes twin copies` in a terminal. Per twin, **What syncs** in its Details (and
+`hermes twin syncs TWIN`) shows each item with the way it goes, when it last synced, and what this version cannot
+do yet; a row that needs the Mirror or is not in this version yet says so and cannot be switched on.
+Hermes → Grok (name, description, instructions and routines made in Grok by the Mirror bot) is a beta, off by
+default: only `hermes twin to-grok beta on` in your own terminal turns it on, then `hermes twin to-grok TWIN allow`
+per twin, and nothing is sent until you look at the preview and apply it. The Auto-Review rule it shows for Grok
+names the bot by its id and covers only edits of that bot's own name, description, instructions and existing
+routines, never a new routine.
 
 <!-- what-copies:begin (written by twin/copies.py: change the table there) -->
 
@@ -251,9 +258,10 @@ table**), and so does `hermes twin copies` in a terminal.
 |---|---|
 | **From Grok to Hermes** | |
 | Name and description | By itself, in seconds, while Hermes is open. |
-| Instructions, routines and connections | With Import setup export: the bot writes a file about itself when you ask it in Grok. Instructions are filled in, routines arrive switched off, and connections arrive as a list of names. Logins are never copied. |
+| Instructions, routines and connections | With Import setup export: the bot writes a file about itself when you ask it in Grok. Instructions are filled in, routines arrive switched off, and connections arrive as a list of names. Logins are never copied. With skill sync set up, instructions also follow Grok's every 15 minutes by themselves, unless you switch that off. When it is unsure which to keep, you are asked. |
 | Skills | With skill sync, which is optional: a sync bot in your own Grok account carries them. Without it you copy them yourself. |
-| Grok memory | Does not copy: memory is the most private thing a bot holds, so Grok Bot Twin takes none of it. |
+| Conversations | Does not copy: whole conversations stay in Grok. Copying them comes in a later version. |
+| Grok memory | Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory facts, which need skill sync. |
 | Grok model setting | Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in Hermes. |
 | **From Hermes back to Grok** | |
 | Name, description and instructions | You make the same change in Grok yourself. |
@@ -662,6 +670,24 @@ computer switches it off there, and a new link starts with every switch off; the
 twin that left a computer are deleted after 30 days, or at once with Forget. A computer on an older Grok Bot Twin keeps following
 names and descriptions as before and simply takes no part in memory.
 
+## Memory facts with Grok (0.3.0)
+
+Off for every twin. Switch it on in the twin's **What syncs** panel (row "Memory facts"; the terminal has the
+same panel). Then the facts the Grok bot remembers and the notes in the twin's
+`MEMORY.md` and `USER.md` are kept the same, one fact per note, each ending with where it came from and when:
+`Prefers short answers. (fact g3a91c0e, from Grok, 2000-01-02)`. Leave the part in brackets as it is: it is how
+the fact is matched with Grok. Deleting the whole line removes the fact on both sides.
+
+**Both ways.** A fact added, changed or removed on one side is added, changed or removed on the other. If it was
+changed on both sides, or changed on one and removed on the other, both stay as they are and the panel asks which
+to keep (`hermes twin facts "Test Scout" keep <id> hermes|grok`). Before a memory file is changed, the file as it
+was is kept (`hermes twin facts "Test Scout" restore <point>`).
+
+**What never crosses.** The same check as memory between your computers: a fact that looks like it holds a
+password, key, code or card number, or reads like an instruction, stays where it was written; the panel counts
+them and never shows them. Both directions need the Mirror: until it is set up, the row says so and no fact
+moves.
+
 ## Ask a twin on another computer
 
 Once your computers are linked, a twin can ask its copy on another one to do something there. In a chat with
@@ -913,8 +939,8 @@ hermes twin
 - **Ask another computer**: `ask COMPUTER "TEXT"`, `requests` (the log), `requests on|off`,
   `requests approve|deny ID`, `requests mode [here|linked|safe]`.
 - **Fix things**: `conflicts`, `resolve`, `versions`, `restore`, `doctor`, `setup`.
-- **Advanced**: `check`, `list-grok`, `recent`, `compare`, `copies`, `checklist`, `import`, `switch`, `approve`, `skip`,
-  `send-to-grok`, `skill-sync`, `digest`, `verify`, `demo`, `uninstall`.
+- **Advanced**: `check`, `list-grok`, `recent`, `compare`, `copies`, `checklist`, `syncs`, `import`, `switch`, `approve`,
+  `skip`, `send-to-grok`, `skill-sync`, `digest`, `verify`, `demo`, `uninstall`.
 
 Also: `check` (sync) and `move` (switch). The older names still work: `restore-points` (versions), `parity`
 (compare), `mirror` (skill-sync), `attest` (verify).
