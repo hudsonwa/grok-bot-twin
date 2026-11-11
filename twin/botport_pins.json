@@ -1,0 +1,24 @@
+{
+ "about": [
+  "SHA-256 of the botport release files this plugin version accepts as genuine without GitHub's tool.",
+  "Written by tools/pin_botport.py from the release files, each checked there with gh attestation verify.",
+  "archives: release file name -> sha256. programs: build target -> sha256 of the unpacked botport program.",
+  "A release with no digests here is not pinned: the plugin then offers the GitHub check instead."
+ ],
+ "releases": {
+  "v0.2.1": {
+   "archives": {
+    "botport-aarch64-apple-darwin.tar.gz": "6cdc18204347fc5d97c94bc5463fc7c72ab9b83c2207f279f647be7fe077e08d",
+    "botport-x86_64-apple-darwin.tar.gz": "4472550e273250e6f9e89bf062511d27df21b3016184c19f6ab18cbf990da881",
+    "botport-x86_64-unknown-linux-musl.tar.gz": "5782bdb5236ffe99533f8cf001a5056d355c5e6e3e57e79c372a5bbbd19eff54",
+    "botport-aarch64-unknown-linux-musl.tar.gz": "768f255bc9933cdb9f68b6aaa162aaca42fcfa711461c8f7e637682fd4247db1"
+   },
+   "programs": {
+    "aarch64-apple-darwin": "998f6ac869bb61d954445c324daa2d9e2a98c6ebc927bb5fda908397c43c3275",
+    "x86_64-apple-darwin": "7bb57fa6820970ee0d2f638914c59dfe8be394692692470d1308d7dd2ee4d988",
+    "x86_64-unknown-linux-musl": "67508e19cffb6a25de86a31ded29eb3aa3cc3894ac745fe44a63e86b257f83f3",
+    "aarch64-unknown-linux-musl": "250e7a5102ae33657f8e125e9160b2f94da528756b2b0b3c09a8ac0067913ab2"
+   }
+  }
+ }
+}

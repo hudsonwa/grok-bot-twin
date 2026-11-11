@@ -1,0 +1,10 @@
+{
+  "note": "Shape of the answers about the settings that follow between the owner's computers (GET /fleet/settings; POST /fleet/settings, /fleet/settings/restore, /fleet/settings/follow), written from the sharing contract's addendum about settings. tests/desktop/settings.mjs checks its invented answers against it.",
+  "shapes": {
+    "SettingsItem": {"required": {"id": "str", "label": "str", "what": "str", "on": "bool"}, "optional": {"note": "str|null"}, "closed": true, "note": "id: tools | preferences | persona | model; note: one more sentence under the switch, e.g. that each computer keeps its own model"},
+    "SettingsNeed": {"required": {"kind": "str", "name": "str", "message": "str"}, "closed": true, "note": "kind: connector | tools | model; message is ready to show"},
+    "SettingsPoint": {"required": {"point": "str", "at": "str", "items": "list[str]", "label": "str"}, "closed": true},
+    "SettingsTwin": {"required": {"id": "str", "name": "str", "profile": "str|null", "state": "str", "synced_at": "str|null", "changed": "list[str]", "needs": "list[SettingsNeed]", "held": "bool", "restore": "list[SettingsPoint]"}, "optional": {"error": "ErrorBody|null"}, "closed": true, "note": "state: in_sync | waiting | held | set_up | error | off"},
+    "Settings": {"route": "GET /fleet/settings; POST /fleet/settings, /fleet/settings/restore, /fleet/settings/follow", "required": {"role": "str", "other": "str|null", "state": "str", "sentence": "str", "never": "str", "items": "list[SettingsItem]", "twins": "list[SettingsTwin]"}, "closed": true, "note": "role: source | follower | none; state: on | waiting | older | none"}
+  }
+}

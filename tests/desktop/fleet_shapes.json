@@ -1,0 +1,24 @@
+{
+  "note": "Shapes of the answers about other computers, written from the sharing contract, version 1 (the local routes). tests/desktop/contract.mjs checks the page's mock answers against them. When tests/contract/api_shapes.json (the backend's own file) defines a shape of the same name, that one wins and the copy here is ignored; `extend` adds optional keys to existing shapes only where the backend's file does not list them yet.",
+  "shapes": {
+    "Machine": {"required": {"id": "str", "name": "str", "platform": "str"}, "closed": true},
+    "LinkCode": {"required": {"code": "str", "expires_at": "str", "expires_in_s": "int"}, "closed": true},
+    "Share": {"required": {"on": "bool", "state": "str", "network": "str|null", "address": "str|null", "port": "int", "since": "str|null", "problem": "ErrorBody|null", "code": "LinkCode|null"}, "closed": true},
+    "Source": {"required": {"id": "str", "name": "str", "platform": "str", "address": "str|null", "port": "int", "state": "str", "linked_at": "str|null", "last_sync_at": "str|null", "last_contact_at": "str|null", "offline_since": "str|null", "problem": "ErrorBody|null"}, "closed": true},
+    "FleetMachine": {"required": {"id": "str", "name": "str", "platform": "str", "role": "str", "this": "bool", "state": "str", "linked_at": "str|null", "last_seen_at": "str|null", "last_sync_at": "str|null", "twins": "int|null", "failed": "int|null"}, "closed": true},
+    "FleetTwinMachine": {"required": {"id": "str", "name": "str", "role": "str", "this": "bool", "state": "str", "last_sync_at": "str|null"}, "optional": {"error": "ErrorBody|null"}, "closed": true, "note": "state: in_sync | behind | offline | pending | unknown; pending (sharing machine only): that machine has never reported holding this twin, so the twin is on its way there, not there"},
+    "FleetTwin": {"required": {"id": "str", "name": "str", "description": "str", "version": "int", "updated_at": "str|null", "pair_id": "str|null", "profile": "str|null", "state": "str", "synced_at": "str|null", "error": "ErrorBody|null", "machines": "list[FleetTwinMachine]"}, "optional": {"note": "str", "changed_at": "str", "changed": "str"}, "closed": true, "note": "changed_at, changed (on a linked computer only): when this twin's first copy, or a new name or description of it, last arrived on this computer, and which (\"new\", \"name\" or \"description\"; \"description\" when both changed); note: one sentence about this twin on this computer, e.g. that it arrived under another name; the page shows it when it is sent"},
+    "RemovedTwin": {"required": {"rid": "str", "id": "str", "name": "str", "profile": "str|null", "removed_at": "str", "kept_until": "str", "reason": "str"}, "closed": true},
+    "LastUnlink": {"required": {"at": "str", "by": "str", "source_name": "str"}, "closed": true},
+    "Fleet": {"route": "GET /fleet; POST /fleet/share, /fleet/link, /fleet/name, /fleet/sync, /fleet/removed/{rid}/restore", "required": {"role": "str", "this_machine": "Machine", "can_share": "bool", "share": "Share", "source": "Source|null", "machines": "list[FleetMachine]", "twins": "list[FleetTwin]", "removed": "list[RemovedTwin]", "last_unlink": "LastUnlink|null"}, "closed": true},
+    "LeavingMachine": {"required": {"id": "str", "name": "str"}, "closed": true},
+    "Leaving": {"route": "POST /fleet/unlink; POST /fleet/machines/{id}/remove", "required": {"dry_run": "bool", "unlinked": "bool", "machine": "LeavingMachine", "sentence": "str", "stays": "list[str]", "goes": "list[str]", "undo": "str"}, "closed": true},
+    "FleetBriefSource": {"required": {"name": "str", "state": "str", "offline_since": "str|null"}, "closed": true},
+    "FleetBrief": {"route": "GET /status fleet", "required": {"role": "str", "sharing": "bool", "machines": "int", "source": "FleetBriefSource|null"}, "closed": true},
+    "PairFleet": {"route": "GET /status pairs[i].fleet (on the computer that shares)", "required": {"id": "str", "machines": "list[FleetTwinMachine]"}, "closed": true}
+  },
+  "extend": {
+    "Status": {"optional": {"fleet": "FleetBrief"}},
+    "Pair": {"optional": {"fleet": "PairFleet"}}
+  }
+}

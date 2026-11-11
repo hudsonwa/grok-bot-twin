@@ -1,0 +1,175 @@
+{
+ "about": "Shapes of the local API for requests between the owner's computers (routes /tasks*). Same rules as api_shapes.json; checked against the real backend in tests/test_tasks_units.py and tests/test_tasks_machines.py.",
+ "shapes": {
+  "Tasks": {
+   "route": "GET /tasks; also the answer of POST /tasks/switch, POST /tasks/mode, POST /tasks/{id}/approve and POST /tasks/{id}/answer",
+   "required": {
+    "switch": "TasksSwitch",
+    "linked": "bool",
+    "this_machine": "TasksThis",
+    "machines": "list[TasksMachine]",
+    "working": "bool",
+    "log": "list[TaskLogRow]",
+    "limits": "TasksLimits",
+    "waiting": "list[TaskWaiting]",
+    "mode": "TasksMode",
+    "asking": "list[TaskAsking]"
+   },
+   "closed": true
+  },
+  "TasksSwitch": {
+   "note": "on: whether this computer takes requests from the owner's other computers. Off by default. network: what carries this computer's link (tailscale | lan | loopback | null); on lan requests and answers are signed but readable, and the page says so",
+   "required": {
+    "on": "bool",
+    "since": "str|null",
+    "label": "str",
+    "network": "str|null"
+   },
+   "closed": true
+  },
+  "TasksThis": {
+   "required": {
+    "name": "str"
+   },
+   "closed": true
+  },
+  "TasksMachine": {
+   "note": "the owner's other computers, by name. takes_requests: what THIS computer last heard about that computer's own switch (true: on, false: off, null: not known: never heard, or not heard lately). The sharing computer hears it first hand; a linked computer hears it in the sharing computer's signed answers and only while in sync",
+   "required": {
+    "id": "str",
+    "name": "str"
+   },
+   "optional": {
+    "takes_requests": "bool|null"
+   },
+   "closed": true
+  },
+  "TasksLimits": {
+   "required": {
+    "request_chars": "int",
+    "reply_chars": "int",
+    "per_minute": "int",
+    "per_hour": "int"
+   },
+   "closed": true
+  },
+  "TaskLogRow": {
+   "note": "dir: out (asked from here; peer = the computer asked) | in (asked of this computer; peer = who asked) | relay (passed along by the sharing computer; peer asked peer_to; no text). state: queued | running | waiting_approval | done | failed | refused | timeout | cancelled. label: ready to show",
+   "required": {
+    "id": "str",
+    "dir": "str",
+    "peer": "str",
+    "peer_to": "str|null",
+    "twin": "str",
+    "text": "str",
+    "state": "str",
+    "code": "str|null",
+    "asked_at": "str|null",
+    "ended_at": "str|null",
+    "seconds": "int|null",
+    "reply": "str",
+    "label": "str",
+    "approval": "TaskApproval|null",
+    "answered": "TaskAnswered|null"
+   },
+   "closed": true
+  },
+  "TaskResult": {
+   "route": "POST /tasks/ask and POST /tasks/check",
+   "note": "label: 'done on Surface - 12 s', 'waiting for approval on Surface', 'not sent: requests are switched off on Surface', ... hint: only while waiting for approval; approval: only while a step waits there AND that computer lets this one answer it",
+   "required": {
+    "id": "str",
+    "machine": "TaskResultMachine",
+    "twin": "str",
+    "state": "str",
+    "label": "str",
+    "seconds": "int|null",
+    "reply": "str",
+    "error": "ErrorBody|null"
+   },
+   "optional": {
+    "hint": "str",
+    "approval": "TaskResultApproval"
+   },
+   "closed": true
+  },
+  "TaskResultMachine": {
+   "required": {
+    "id": "str",
+    "name": "str"
+   },
+   "closed": true
+  },
+  "TaskWaiting": {
+   "note": "a step of a request that waits for the owner of THIS computer; answered with POST /tasks/{id}/approve {\"choice\": \"once\"|\"deny\"}. command and description are what Hermes shows for the step; they never leave this computer",
+   "required": {
+    "id": "str",
+    "peer": "str",
+    "twin": "str",
+    "text": "str",
+    "command": "str",
+    "description": "str",
+    "asked_at": "str|null",
+    "q": "str"
+   },
+   "closed": true
+  },
+  "TaskApproval": {
+   "required": {
+    "command": "str",
+    "description": "str",
+    "asked_at": "str|null",
+    "q": "str"
+   },
+   "closed": true
+  },
+  "TasksMode": {
+   "note": "what happens on THIS computer when a step of a request needs approval. value: here (default; the step waits for the owner on this computer) | linked (the computer that asked is shown the step and may answer it too) | safe (such a step is refused at once). Chosen on this computer only, with POST /tasks/mode {\"mode\"} or `hermes twin requests mode`; no other computer can set it. warning: the one sentence to show before `linked` is turned on",
+   "required": {
+    "value": "str",
+    "label": "str",
+    "choices": "list[TasksModeChoice]",
+    "warning": "str"
+   },
+   "closed": true
+  },
+  "TasksModeChoice": {
+   "required": {
+    "value": "str",
+    "label": "str",
+    "note": "str"
+   },
+   "closed": true
+  },
+  "TaskAsking": {
+   "note": "a step that waits on ANOTHER computer (peer) for a request asked from this one, which that computer lets this one answer (its mode is `linked`); answered with POST /tasks/{id}/answer {\"choice\": \"once\"|\"deny\", \"q\"}. command and description are the step as that computer shows it, password-like text hidden",
+   "required": {
+    "id": "str",
+    "peer": "str",
+    "twin": "str",
+    "text": "str",
+    "command": "str",
+    "description": "str",
+    "asked_at": "str|null",
+    "q": "str"
+   },
+   "closed": true
+  },
+  "TaskAnswered": {
+   "note": "a step of this request was answered from the computer that asked (mode `linked`): what was answered and the name of the computer it was answered on",
+   "required": {
+    "choice": "str",
+    "by": "str"
+   },
+   "closed": true
+  },
+  "TaskResultApproval": {
+   "note": "the step as the asked computer shows it, for the owner to read. Its mark is not in a result: the page (Tasks.asking), `hermes twin requests` and /twin approve show what answers it",
+   "required": {
+    "command": "str",
+    "description": "str"
+   },
+   "closed": true
+  }
+ }
+}

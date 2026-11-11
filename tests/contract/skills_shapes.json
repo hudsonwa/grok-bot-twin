@@ -1,0 +1,93 @@
+{
+ "about": "Shapes of the local API for the twins' skills on the owner's linked computers (routes /fleet/skills*). Same rules as api_shapes.json and tasks_shapes.json: required keys are always present, optional keys may be absent, closed shapes carry no other key. Checked against the page's fixtures in tests/desktop/skills.mjs.",
+ "shapes": {
+  "SkillsSync": {
+   "route": "GET /fleet/skills; also the answer of POST /fleet/skills/switch, /fleet/skills/item, /fleet/skills/keep and /fleet/skills/restore",
+   "note": "role: source (this computer shares its twins' skills) | follower (it takes them) | none (nothing to show; the page draws nothing). on: this computer's own switch, off by default. state: off | on | waiting | off_there | older_there | not_linked. what: one sentence, ready to show, saying what goes between the computers and what never does. message: the state in a sentence, ready to show, or empty. other: the computer at the other end (a linked computer: the one that shares; null on the sharing computer). undo: only after keep and restore, the version that puts back what that act replaced (null when nothing was replaced)",
+   "required": {
+    "role": "str",
+    "on": "bool",
+    "state": "str",
+    "what": "str",
+    "message": "str",
+    "other": "SkillsOther|null",
+    "twins": "list[SkillsTwin]",
+    "counts": "SkillsCounts"
+   },
+   "optional": {
+    "undo": "SkillUndo|null"
+   },
+   "closed": true
+  },
+  "SkillsOther": {
+   "required": {
+    "id": "str",
+    "name": "str"
+   },
+   "closed": true
+  },
+  "SkillsTwin": {
+   "note": "id: t- and 16 hex digits, the twin's id in GET /fleet",
+   "required": {
+    "id": "str",
+    "name": "str",
+    "skills": "list[Skill]"
+   },
+   "closed": true
+  },
+  "SkillsCounts": {
+   "required": {
+    "skills": "int",
+    "conflicts": "int",
+    "changed_here": "int",
+    "only_here": "int",
+    "off": "int"
+   },
+   "closed": true
+  },
+  "Skill": {
+   "note": "key: the skill's folder below the twin's skills folder, one or two plain names (group/name). state: in_sync | off | only_here | changed_here | conflict | waiting | too_big | removed_there | error. label and note: ready to show. on: the sharing computer shares this skill; a linked computer follows it (false there: only on this computer). switch_label: the spoken name of the row's switch. choices: empty unless the owner has a choice to make. versions: newest first, 10 at most",
+   "required": {
+    "key": "str",
+    "name": "str",
+    "group": "str|null",
+    "version": "int",
+    "updated_at": "str|null",
+    "state": "str",
+    "label": "str",
+    "on": "bool",
+    "can_switch": "bool",
+    "switch_label": "str",
+    "note": "str|null",
+    "choices": "list[SkillChoice]",
+    "versions": "list[SkillVersion]"
+   },
+   "closed": true
+  },
+  "SkillChoice": {
+   "note": "keep: mine | theirs. label: the button's words, ready to show",
+   "required": {
+    "keep": "str",
+    "label": "str"
+   },
+   "closed": true
+  },
+  "SkillVersion": {
+   "note": "vid: k- and 12 hex digits (what a change replaced on this computer) or v and a number (a version the sharing computer sent out). label: ready to show",
+   "required": {
+    "vid": "str",
+    "at": "str",
+    "label": "str"
+   },
+   "closed": true
+  },
+  "SkillUndo": {
+   "required": {
+    "twin": "str",
+    "skill": "str",
+    "vid": "str"
+   },
+   "closed": true
+  }
+ }
+}

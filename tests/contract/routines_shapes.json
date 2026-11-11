@@ -1,0 +1,72 @@
+{
+ "about": "Shapes of the local API for routines on the owner's computers (routes /fleet/routines*), as the addendum xs-routines of the sharing contract lists them. Same rules as api_shapes.json. tests/desktop/routines.mjs checks the page's canned answers against them. Two names differ from the addendum on purpose: a restore point is RoutineRestorePoint here, because api_shapes.json already has a RestorePoint (a twin's earlier version, other keys) and the test files merge their shapes into one table; and the three-key computer of runs_on / can_move_to has its own name, RoutineTarget.",
+ "shapes": {
+  "Routines": {
+   "route": "GET /fleet/routines; also the answer of POST /fleet/routines, POST /fleet/routines/{id}/move and POST /fleet/routines/restore/{uid}",
+   "note": "role: source | follower | none. on: this computer copies routines (on the computer with the Grok app: sends them; on a linked computer: keeps copies). can_run: the owner's switch 'routines may run on this computer' (a linked computer; off by default). supported: false when the other side has an older Grok Bot Twin; problem then says so. sentence, what_syncs, never: ready to show. local_only: routines that stay on this computer because they need a script, a working folder or an interpreter",
+   "required": {
+    "role": "str",
+    "on": "bool",
+    "can_run": "bool",
+    "supported": "bool",
+    "state": "str",
+    "sentence": "str",
+    "what_syncs": "list[str]",
+    "never": "list[str]",
+    "machines": "list[RoutineMachine]",
+    "routines": "list[Routine]",
+    "local_only": "int",
+    "restore": "list[RoutineRestorePoint]",
+    "problem": "ErrorBody|null"
+   },
+   "closed": true
+  },
+  "RoutineMachine": {
+   "note": "the owner's computers, this one included (this: true). can_run: whether routines may run there",
+   "required": {
+    "id": "str",
+    "name": "str",
+    "this": "bool",
+    "can_run": "bool"
+   },
+   "closed": true
+  },
+  "Routine": {
+   "note": "id: j- and 16 hex. state: running | paused | moving | off. label: ready to show ('runs on mini', 'runs here', 'moving to Surface: waiting for mini to stop it', 'paused on mini'). runs_on: where it is wanted to run. waiting_for: the name of the computer that has yet to stop it, while moving. can_move_to: the computers one click can move it to. can_force: the computer that has to stop it cannot confirm, and a second, explicit act may start it anyway (POST .../move {to, force: true})",
+   "required": {
+    "id": "str",
+    "twin": "str",
+    "twin_name": "str",
+    "name": "str",
+    "schedule": "str",
+    "on": "bool",
+    "runs_on": "RoutineTarget",
+    "state": "str",
+    "label": "str",
+    "waiting_for": "str|null",
+    "can_move_to": "list[RoutineTarget]",
+    "can_force": "bool"
+   },
+   "closed": true
+  },
+  "RoutineTarget": {
+   "note": "a computer by name; this: it is the computer that answers",
+   "required": {
+    "id": "str",
+    "name": "str",
+    "this": "bool"
+   },
+   "closed": true
+  },
+  "RoutineRestorePoint": {
+   "note": "the addendum's RestorePoint. id: u-…; put back with POST /fleet/routines/restore/{id} (the routine comes back in Hermes as it was, paused). label: ready to show",
+   "required": {
+    "id": "str",
+    "at": "str|null",
+    "what": "str",
+    "label": "str"
+   },
+   "closed": true
+  }
+ }
+}
