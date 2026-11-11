@@ -95,6 +95,16 @@ runs; otherwise it is refused with a message saying why. `hermes twin doctor` sh
   browser makes when it unpacks it). No folder is listed and no file is opened for this.
   `hermes twin setup` looks in the same way, and a run of it takes that file only after you said yes (or gave
   `--yes`) to the line that names it; `hermes twin setup --check` and `--plan` only say that it is there.
+- While the sheet for new twins watches for setup exports (after you pressed **Do all ticked now**, while that
+  sheet is open, at most 15 minutes, every 4 seconds): the names, dates and sizes of the files in your Downloads
+  folder (that one folder, not its sub-folders; links are not followed), and the text of each regular file
+  that changed since the watching began, ends in `.json`, `.txt` or `.md` and is at most 2 MB (at most 40 files).
+  With skill sync set up, the same watch also reads `<shared folder>/exports/` (files named
+  `grok-bot-export-<bot id>.json` the sync bot copied up from the box, at most 2 MB, never moved or deleted; only
+  digests are remembered).
+  A file whose text is not a `grok-bot-export` document is not used. What is taken from an export is the same as
+  for **Import setup export** below; the text is not stored. `hermes twin import-exports DIR` reads the folder
+  you name in the same way, once.
 - Through botport, from the Grok desktop app's local files: the bot list (id, name, description) plus the
   selected bots' local transcript files, capped (200 files, 64 MiB) and parsed only for routine-change events
   (nothing else is kept or shown). botport never opens login or credential files (no other file in the app's
@@ -139,6 +149,8 @@ same folder, fsync, rename; links are not followed):
 | `stuck.json` | per twin, when botport refused to update the twin's Hermes bot because a line in one of its files looks like a password or key to botport: the file name and the line number only, so the Twins page can say which line |
 | `points.json` | per twin, what took an earlier version's place (your paste, a change from Grok, your choice, a put-back, a send, an import): ids and one word, no text |
 | `setup-export.json` | per twin, when you last imported a setup export and the connector names it listed to set up on this computer (names only, at most 50, links, addresses and anything password-like taken out; nothing else of the file). Stop twinning forgets it |
+| `batch-seen.json` | the setup export files the new-twins sheet already imported: a SHA-256 digest of each file's name, size and date (no name, no text), at most 500, so the same file is not imported twice |
+| `grok-part.json` | only while **Let Hermes do the Grok part** is on (30 minutes at most, or until stopped): the ids and names of the ticked twins and a digest of the request text, which the `pre_tool_call` guard reads |
 | `events.jsonl` | last 500 events, metadata only (type, time, twin id, bot name, counts, item ids; never item text or secret values) |
 | `activity.json` | per twin: time of the last Hermes chat turn and a count (no content) |
 | `digest.json` | per-twin digest switches (off unless you turn them on) |
@@ -178,7 +190,8 @@ an `@`, lies under `Library/CloudStorage` or has a folder whose name starts with
 folder's name, where the set-up folder is on this computer, whether it was complete, which release file was
 still missing with its download address, whether the twin joined through the shared folder, and whether the
 set-up was finished; never a pass) and the step of it you were at; that you chose to wait for a bot
-that left Grok; and that you were sent to choose a model. Besides: the list of twins something is remembered
+that left Grok; and that you were sent to choose a model. While Hermes does the Grok part for new twins
+(at most 30 minutes): `batch-open`, the ticked twins' ids and two times, so the Twins page reopens their sheet. Besides: the list of twins something is remembered
 for, the Hermes profile your twins are looked after in, when you unlinked this computer on the page, which bots
 you had ticked in "Connect my Grok bots" (their Grok ids only, until a twin is made or the ticks are cleared), and, after
 "Remove Grok Bot Twin…", that everything was removed (so the last screen is still there after a look elsewhere;
@@ -215,6 +228,7 @@ background helper":
 | `memories/MEMORY.md`, `memories/USER.md` (and Hermes' own `.lock` file beside each) | the merged notes of that twin (see "A twin's memory between your computers") | only for a twin whose memory you switched on |
 | `config.yaml` | `model`, `fallback_providers`, `fallback_model`, copied from your default Hermes profile and kept to model ids and provider names (keys, addresses and headers are dropped; `.env` is never read). Added to the end of the file; nothing else in it changes. | once, when a twin is made and its Hermes bot has no model while you have a default one |
 | `SOUL.md` | the fleet note, in a block of the plugin's own (`<!-- grok-bot-twin:begin fleet -->` … `end`): four lines of fixed wording saying which computer this copy is on, on which other computers copies run, and which computer is the source. Computer names are limited to `A-Z a-z 0-9 space . _ -`; the twin's name is used only when it is plain text (else "this twin"). | when a twin is made, and when the set of your linked computers or one of their names changes; also when you never share ("No other computer holds a copy yet.") |
+| `config.yaml` | `model` set to the model id you chose on the new-twins sheet or with `hermes twin finish --model` (a plain model id only; a `model` mapping keeps its other keys, such as the provider). | when you choose a model for a twin there |
 | `config.yaml` | `grok-bot-twin` in `plugins.enabled`, so the plugin is on inside the twin's own Hermes bot (its chats then know they are a twin). Three lines added at the end of a file that has no `plugins` section; a file that has one is rewritten only when it reads back exactly as intended. A bot where you listed the plugin under `plugins.disabled` is left alone. | when a twin is made |
 | `plugins/grok-bot-twin/` | a copy of the plugin's own installed folder (its code, page and manifest; no tests), with a marker file. Hermes loads a bot's plugins from that bot's own folder, so without the copy the line above would switch nothing on. Refreshed when the installed plugin changed. A folder of that name without the marker (your own install) is never touched. | with the line above |
 
@@ -427,7 +441,9 @@ nothing changes (a look at four file dates every 5 s and one waiting request to 
 ## Network
 
 Unless you use "Share my twins with my other computers" (below), the plugin makes no network calls and uploads
-nothing itself. botport makes none for twins: skill sync works through a folder that your
+nothing itself, with one exception: the "finish several twins" sheet sends `GET <base_url>/models` to each model
+server already set up in the default Hermes profile's `config.yaml` (at most 6, 2 s timeout, no key or
+Authorization header sent) to list the models it serves. The plugin never downloads a model. botport makes none for twins: skill sync works through a folder that your
 own sync app keeps on both sides (or that your sync bot reaches on this computer). "Download it" in the skill
 sync sheet hands the address of botport's release file for the sync bot's box to your browser. `gh attestation verify` talks to GitHub only when that check runs (see
 "Processes it starts"); verifying botport against the plugin's own list needs no network. "Download botport" hands the address of botport's
@@ -817,6 +833,19 @@ prompt file, and stays readable on a plain home network like everything else tha
   chats as it always does. They were written by that twin on one of your own computers, pass the plugin's
   check for instruction-like text before they are written, and Hermes checks them again when it loads them.
 
+- `pre_tool_call` (the guard for **Let Hermes do the Grok part**): it does nothing unless you pressed that
+  button on the Twins page and ticked "I will approve each step myself", and then only for 30 minutes (or until
+  Stop) and only for Hermes' `computer_use` tool. While on, it lets looking at the Grok window pass, makes Hermes
+  ask you before every other step, and refuses other apps, other chats, any text except the setup export request
+  or a ticked bot's name, keys other than Return, Escape and Tab (no paste), steps that do not name the Grok app,
+  listing apps or windows, and steps from any chat but the first one that used computer_use. If the guard itself cannot run
+  while the flow's file is there, the step is refused. It reads the default profile's
+  `config.yaml` (`platform_toolsets.cli`, `agent.disabled_toolsets`, `approvals.mode`, `computer_use.backend`) and
+  Hermes' `tools/facts.json` to find the driver; it runs nothing. It writes one file, `grok-part.json` (see "Files
+  it writes"), deleted by Stop. Answer Once: an "always" answer leaves one Hermes allowlist entry that never
+  matches again. Pictures of the Grok window, including its list of chats, go to that chat's model provider:
+  that is the privacy cost of this path, and the reason it is optional. The message the page puts into that chat
+  holds the ticked bots' names (as data, quoted) and the request text, nothing else.
 - `pre_llm_call`, only in a twin's Hermes profile and only if "Let chats know this is a twin" (`inject_context`)
   is on: at most 10 lines of fixed wording, "your Grok twin", an opaque twin ref (`t-` plus 16 hex characters),
   the state label and counts. No bot name, description, skill, routine or any other free text from Grok.

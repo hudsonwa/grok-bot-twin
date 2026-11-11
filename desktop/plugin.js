@@ -2992,7 +2992,7 @@ function forgetEverything(storage, shown = []) {
   const ids = new Set([...notedTwins(storage), ...shown])
 
   ids.forEach(id => typeof id === 'string' && id && forgetTwin(storage, id))
-  ;[NOTED_KEY, HOME_KEY, UNLINKED_KEY, PLACE_KEY].forEach(k => storage?.remove?.(k))
+  ;[NOTED_KEY, HOME_KEY, UNLINKED_KEY, PLACE_KEY, BATCH_KEY].forEach(k => storage?.remove?.(k))
 }
 
 // Something of the page's own is left although the plugin's data folder is empty (Grok Bot Twin was removed
@@ -3660,12 +3660,12 @@ const CHECKBOX = 'mt-1 border-(--ui-text-tertiary)'
 const TICK_LABEL = 'flex min-w-0 flex-1 flex-col py-1'
 
 // A ticked row stays as it is written: a tick, never a strike-through (that reads as deleted).
-function CheckRow({ id, checked, onChange, title, detail, disabled }) {
+function CheckRow({ id, checked, onChange, title, detail, disabled, label }) {
   return el(
     'div',
     // (a row that cannot be ticked is quieter by its colour, never faded: faded 12 px words are 3 to 1)
     { className: 'flex min-w-0 items-start gap-2.5 py-0.5' },
-    jsx(Checkbox, { checked, className: CHECKBOX, disabled, id, onCheckedChange: v => onChange(v === true) }),
+    jsx(Checkbox, { 'aria-label': label ? clean(label, 120) : undefined, checked, className: CHECKBOX, disabled, id, onCheckedChange: v => onChange(v === true) }),
     el(
       'label',
       { className: cn(TICK_LABEL, !disabled && 'cursor-pointer'), htmlFor: id },
@@ -5811,7 +5811,8 @@ function AddFlow({ open, onClose, onFinish, onSample, onLink, ready, storage = n
         )
     ]
   } else {
-    // A new twin is started, not finished: it has the name and the description, and the page says what is left.
+    // A new twin has the name and the description. What is still left (its instructions, a model) is done for
+    // every new twin at once in the batch sheet; a twin with nothing left is ready.
     const made = Array.isArray(created) ? created : []
     const only = made.length === 1 ? made[0] : null
     const left = only ? leftOf(only) : null
@@ -5820,7 +5821,9 @@ function AddFlow({ open, onClose, onFinish, onSample, onLink, ready, storage = n
       onClose()
     }
 
-    const firstLeft = made.find(p => thingsLeft(p) > 0) ?? null
+    if (made.some(p => !isSample(p) && thingsLeft(p) > 0)) {
+      return jsx(BatchSheet, { onClose, onOneAtATime: onFinish, open, pairs: made, storage })
+    }
 
     if (made.length === 0) {
       title = 'No twin was made'
@@ -5829,14 +5832,14 @@ function AddFlow({ open, onClose, onFinish, onSample, onLink, ready, storage = n
       title = `${owned(nameOf(only))} twin is ready`
       description = 'It follows Grok from now on.'
     } else if (only) {
-      title = `${owned(nameOf(only))} twin is started`
-      description = left ? `It has the name and description. ${capital(plural(left.length, 'thing'))} left, about a minute.` : "It has the bot's name and description, and follows them."
+      title = `${owned(nameOf(only))} twin is made`
+      description = "It has the bot's name and description, and follows them."
     } else {
-      title = `${made.length} twins are started`
-      description = firstLeft ? 'Each has its name and description. Finish them one at a time; the Twins page keeps count.' : 'Each has its name and description.'
+      title = made.every(p => leftOf(p) !== null) ? `${made.length} twins are ready` : `${made.length} twins made`
+      description = made.every(p => leftOf(p) !== null) ? 'They follow Grok from now on.' : 'Each has its name and description.'
     }
 
-    // One twin: the title already names it. Several: the list, with what is left for each.
+    // One twin: the title already names it. Several: the list.
     body = only
       ? null
       : el(
@@ -5847,22 +5850,14 @@ function AddFlow({ open, onClose, onFinish, onSample, onLink, ready, storage = n
               'div',
               { className: 'flex min-w-0 items-center gap-3', key: p?.pair_id ?? i },
               jsx(Avatar, { name: nameOf(p) }),
-              jsx(Truncate, { className: 'flex-1 text-sm font-medium text-(--ui-text-primary)', max: 60, text: nameOf(p) }),
-              thingsLeft(p) > 0 && el('span', { className: SMALL }, `${plural(thingsLeft(p), 'thing')} left`)
+              jsx(Truncate, { className: 'flex-1 text-sm font-medium text-(--ui-text-primary)', max: 60, text: nameOf(p) })
             )
           )
         )
 
     const canOpen = only && !isSample(only) && only?.hermes?.profile
 
-    if (firstLeft) {
-      footer = [
-        el(Button, { key: 'done', onClick: onClose, variant: 'ghost' }, 'Later'),
-        // started is usable: it can be opened before it is finished
-        canOpen && el(Button, { 'aria-label': `Open ${nameOf(only)} in Hermes`, key: 'open', onClick: () => openTwin(only), variant: 'ghost' }, 'Open in Hermes'),
-        el(Button, { key: 'finish', onClick: () => (onFinish ? onFinish(firstLeft.pair_id) : onClose()) }, only ? 'Finish setting up' : `Finish setting up ${nameOf(firstLeft)}`)
-      ]
-    } else if (canOpen && left) {
+    if (canOpen && left) {
       footer = [
         el(Button, { key: 'done', onClick: onClose, variant: 'ghost' }, 'Done'),
         el(Button, { 'aria-label': `Open ${nameOf(only)} in Hermes`, key: 'open', onClick: () => openTwin(only) }, 'Open in Hermes')
@@ -5876,6 +5871,795 @@ function AddFlow({ open, onClose, onFinish, onSample, onLink, ready, storage = n
   }
 
   return el(Sheet, { description, footer, locked: Boolean(busy), onClose, open, title, wide: true }, body)
+}
+
+// ── several new twins at once ───────────────────────────────────────────────
+// After twinning, one sheet for every new twin: tick the twins, one model for all of them, then one request
+// to paste into each bot's chat in Grok. The page looks in the Downloads folder every few seconds while the
+// sheet is open and brings in each answer file as it lands (or the owner drops several files at once). The
+// files' text is held only while it is sent; the backend keeps none of it and never keeps memories.
+const BATCH_EVERY_MS = 4_000
+const BATCH_WATCH_MS = 15 * 60 * 1000
+const BATCH_FILES = 20
+// While Hermes does the Grok part in another chat the page has gone: the open batch is remembered on this
+// computer (ids, the time watching began, when it was handed over) for half an hour, and the Twins page opens
+// the sheet again at the watching step, so the files Hermes saved meanwhile are brought in.
+const BATCH_KEY = 'batch-open'
+const BATCH_KEEP_MS = 30 * 60 * 1000
+
+function rememberBatch(storage, ids, since) {
+  try {
+    storage?.set?.(BATCH_KEY, { at: Date.now(), ids: ids.filter(i => typeof i === 'string' && i).slice(0, 50), since })
+  } catch {
+    // the sheet still works; it is only not opened again by itself
+  }
+}
+
+function forgetBatch(storage) {
+  try {
+    storage?.remove?.(BATCH_KEY)
+  } catch {
+    // nothing kept, nothing to clear
+  }
+}
+
+// The remembered batch, when it is younger than half an hour (an older one is cleared).
+function openBatchOf(storage, now = Date.now()) {
+  let kept = null
+
+  try {
+    kept = storage?.get?.(BATCH_KEY, null) ?? null
+  } catch {
+    return null
+  }
+
+  if (!kept || typeof kept !== 'object') {
+    return null
+  }
+
+  const ids = (Array.isArray(kept.ids) ? kept.ids : []).filter(i => typeof i === 'string' && i).slice(0, 50)
+  const at = Number(kept.at)
+  const since = Number(kept.since)
+
+  if (ids.length === 0 || !Number.isFinite(at) || !Number.isFinite(since) || now - at >= BATCH_KEEP_MS || now < at - 60_000) {
+    forgetBatch(storage)
+
+    return null
+  }
+
+  return { at, ids, since }
+}
+
+// "its instructions and a model" / "its instructions" / "a model"
+function needWords(left) {
+  return joinWords([left.includes('instructions') && 'its instructions', left.includes('model') && 'a model'].filter(Boolean))
+}
+
+// One twin as the batch sheet sees it: what the backend says is left (or, from an older backend, what the
+// twin itself says), and its name in plain text.
+function batchTwinOf(raw, pair) {
+  const own = leftOf(pair) ?? []
+  const left = Array.isArray(raw?.left) ? SETUP_STEPS.filter(k => raw.left.includes(k)) : own
+
+  return { left, name: clean(raw?.name, 60) || nameOf(pair), pair, pairId: pair.pair_id, sample: raw?.sample === true || isSample(pair) }
+}
+
+// What bringing in one twin's file did: counts and plain words only, never a word of the file.
+function batchResultOf(r) {
+  return {
+    connectors: countOf(r?.connectors) ?? 0,
+    file: clean(r?.file, 120),
+    instructions: r?.instructions === true,
+    leftOut: countOf(r?.lines_left_out) ?? 0,
+    routines: countOf(r?.routines) ?? 0,
+    state: clean(r?.state, 20),
+    why: plainText(r?.why, 240)
+  }
+}
+
+// A twin that is done stays done; "no file yet" never takes the place of anything.
+function mergeBatch(prev, results) {
+  const next = { ...prev }
+
+  for (const r of listOf(results).slice(0, 200)) {
+    const pid = typeof r?.pair_id === 'string' ? r.pair_id : ''
+    const got = batchResultOf(r)
+
+    if (!pid || got.state === 'no_file' || (next[pid]?.state === 'done' && got.state !== 'done')) {
+      continue
+    }
+
+    next[pid] = got
+  }
+
+  return next
+}
+
+// The lines under one twin: the first says where it is, the others what came with its file.
+function batchLines(name, got, already) {
+  if (got?.state === 'done') {
+    return [
+      got.instructions ? `${name}: instructions in ✓` : `${name}: its file is in; it has no instructions ✓`,
+      got.routines > 0 && `${plural(got.routines, 'routine')} added, switched off`,
+      got.connectors > 0 && `${plural(got.connectors, 'connector')} to set up here`,
+      got.leftOut > 0 && `${plural(got.leftOut, 'line')} left out: ${got.leftOut === 1 ? 'it looks' : 'they look'} like a password or key`
+    ].filter(Boolean)
+  }
+
+  if (already) {
+    return [`${name}: instructions in ✓`]
+  }
+
+  if (got?.state === 'failed') {
+    return [`${name}: its file could not be brought in. ${got.why || 'Hermes could not read it.'}`]
+  }
+
+  if (got?.state === 'sample') {
+    return [`${name}: the sample has nothing to bring in`]
+  }
+
+  return [`${name}: waiting for its file…`]
+}
+
+// `initial…` let the smoke test render each state: the instructions step, a stopped watch, files brought in,
+// the permission check ticked, a model that was set.
+function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase = 'choose', initialTicked = null, initialModel = null, initialGot = {}, initialWatch = 'on', initialCopied = null, initialConsent = false, initialModelSaid = null, initialUnmatched = 0, resumed = null }) {
+  const made = listOf(pairs).filter(p => typeof p?.pair_id === 'string' && p.pair_id)
+  const ids = made.map(p => p.pair_id)
+  const q = useQuery({ enabled: open && ids.length > 0, queryFn: () => api(`/batch?pair_ids=${ids.map(encodeURIComponent).join(',')}`), queryKey: [ID, 'batch', ids.join(',')], retry: false })
+  // the twins as the page has them now: a twin whose instructions were pasted meanwhile counts as done
+  const statusQ = useQuery({ enabled: open, queryFn: () => api('/status'), queryKey: STATUS_KEY })
+  // `resumed`: the batch remembered while Hermes does the Grok part (see BATCH_KEY): straight to the watching step
+  const [phase, setPhase] = useState(resumed ? 'instructions' : initialPhase) // 'choose' | 'instructions' | 'grok'
+  const [ticked, setTicked] = useState(() => initialTicked ?? Object.fromEntries(ids.map(i => [i, !resumed || resumed.ids.includes(i)])))
+  const [handedOff, setHandedOff] = useState(Boolean(resumed))
+  const [typedModel, setTypedModel] = useState(initialModel) // null: the model Hermes uses, untouched
+  const [endpointPick, setEndpointPick] = useState(null) // { name, model }: a model server already set up in Hermes
+  const [got, setGot] = useState(initialGot)
+  const [modelSaid, setModelSaid] = useState(initialModelSaid)
+  const [watch, setWatch] = useState(initialWatch) // 'on' | 'stopped'
+  const [since, setSince] = useState(() => (resumed ? resumed.since : Math.floor(Date.now() / 1000) - 5))
+  const [scanProblem, setScanProblem] = useState(null)
+  const [copied, setCopied] = useState(initialCopied)
+  const [consent, setConsent] = useState(initialConsent)
+  const [cuNow, setCuNow] = useState(null) // what the hand-over said, when it refused
+  const [handed, setHanded] = useState('') // the chat message, when neither the chat nor the clipboard took it
+  const [over, setOver] = useState(false)
+  const [problem, setProblem] = useState('')
+  const [unmatched, setUnmatched] = useState(initialUnmatched)
+  const [aside, setAside] = useState(null) // { kind: 'finish' | 'sync', pairId }: a twin's own sheet over this one
+  const [busy, run] = useBusy()
+  const picker = useRef(null)
+  const scanning = useRef(false)
+  const cuQ = useQuery({ enabled: open && phase === 'grok', queryFn: () => api('/batch/computer-use'), queryKey: [ID, 'computer-use'], retry: false })
+
+  const info = q.data && typeof q.data === 'object' ? q.data : null
+  const twins = made.map(p => batchTwinOf(listOf(info?.twins).find(t => t?.pair_id === p.pair_id), p))
+  const needing = twins.filter(t => t.left.length > 0 && !t.sample)
+  const chosen = needing.filter(t => ticked[t.pairId] !== false)
+  const chosenIds = chosen.map(t => t.pairId)
+  const one = needing.length === 1 ? needing[0] : null
+  const request = typeof info?.request === 'string' ? info.request.slice(0, 8000) : ''
+  const privacy = plainText(info?.privacy, 200) || EXPORT_PRIVACY
+  const defaultModel = clean(info?.default_model, 120)
+  const models = [...new Set([defaultModel, ...listOf(info?.models).map(m => clean(m, 120))].filter(Boolean))].slice(0, 20)
+  const endpoints = listOf(info?.endpoints)
+    .map(e => ({ local: e?.local === true, models: listOf(e?.models).map(m => clean(m, 120)).filter(Boolean).slice(0, 20), name: clean(e?.name, 60), reachable: e?.reachable === true }))
+    .filter(e => e.name && e.models.length > 0)
+    .slice(0, 6)
+  const model = (typedModel ?? defaultModel).trim()
+  const endpointName = endpointPick && endpointPick.model === model ? endpointPick.name : ''
+  const changedModel = typedModel !== null && model !== defaultModel
+  const anyModelLeft = chosen.some(t => t.left.includes('model'))
+  const downloadsHere = info?.downloads?.available !== false
+  // with skill sync set up, a bot also saves its file in the Grok box and the sync bot carries it to the shared folder
+  const viaMirror = info?.pickup?.via === 'mirror'
+  const syncIds = info?.skill_sync?.set_up === true ? listOf(info.skill_sync.pair_ids).filter(i => typeof i === 'string') : []
+  const freshPairs = listOf(statusQ.data?.pairs)
+  const pairNow = pid => freshPairs.find(p => p?.pair_id === pid) ?? made.find(p => p.pair_id === pid)
+  // in Hermes already: before (nothing to bring over) or since (pasted in its own sheet meanwhile)
+  const already = t => {
+    const now = leftOf(freshPairs.find(p => p?.pair_id === t.pairId))
+
+    return !t.left.includes('instructions') || (now !== null && !now.includes('instructions'))
+  }
+  const doneFor = t => got[t.pairId]?.state === 'done' || already(t)
+  const allDone = phase !== 'choose' && chosen.length > 0 && chosen.every(doneFor)
+  const watching = open && phase !== 'choose' && watch === 'on' && !allDone && chosenIds.length > 0
+
+  // every twin is in: nothing left to come back to
+  useEffect(() => {
+    if (allDone && handedOff) {
+      forgetBatch(storage)
+    }
+  }, [allDone, handedOff])
+
+  // Done or Later: the batch is not opened again by itself
+  const close = () => {
+    if (handedOff) {
+      forgetBatch(storage)
+    }
+
+    onClose()
+  }
+
+  async function stopHermes() {
+    const res = await run('stop', () => post('/batch/grok-part', { stop: true }), 'Could not stop Hermes')
+
+    if (res) {
+      forgetBatch(storage)
+      setHandedOff(false)
+      host.notify({ id: `${ID}:grok-part`, kind: 'success', message: 'Hermes stopped the Grok part', meta: 'Nothing more is done in Grok. Paste the request yourself for the twins still waiting.' })
+    }
+  }
+
+  function took(results) {
+    const list = listOf(results)
+
+    if (list.some(r => r?.state === 'done')) {
+      refreshAll()
+    }
+
+    setGot(prev => mergeBatch(prev, list))
+  }
+
+  // One look in Downloads: what matches a ticked twin is brought in at once.
+  async function scan() {
+    if (scanning.current) {
+      return
+    }
+
+    scanning.current = true
+
+    try {
+      const res = await post('/batch/downloads', { apply: true, pair_ids: chosenIds, since })
+
+      setScanProblem(null)
+      took(res?.results)
+    } catch (err) {
+      // (said once, with Watch again; never a toast every four seconds)
+      setScanProblem(asProblem(err))
+      setWatch('stopped')
+    } finally {
+      scanning.current = false
+    }
+  }
+
+  // Every 4 s while the sheet is open, for at most 15 minutes.
+  useEffect(() => {
+    if (!watching || !timers) {
+      return undefined
+    }
+
+    const began = Date.now()
+
+    void scan()
+
+    const stop = timers.setInterval(() => {
+      if (Date.now() - began >= BATCH_WATCH_MS) {
+        setWatch('stopped')
+
+        return
+      }
+
+      void scan()
+    }, BATCH_EVERY_MS)
+
+    return () => stop?.()
+  }, [watching, since])
+
+  function watchAgain() {
+    setScanProblem(null)
+    setSince(Math.floor(Date.now() / 1000) - 5)
+    setWatch('on')
+  }
+
+  async function doAll() {
+    // the model goes to the twins that have none, or to every ticked twin when the owner chose another one
+    const targets = chosen.filter(t => changedModel || t.left.includes('model')).map(t => t.pairId)
+
+    if (model && targets.length > 0) {
+      const res = await run('model', () => post('/batch/model', endpointName ? { endpoint: endpointName, model, pair_ids: targets } : { model, pair_ids: targets }), 'Could not set the model')
+
+      if (!res) {
+        return
+      }
+
+      const results = listOf(res.results)
+      const nameFor = r => clean(r?.name, 60) || twins.find(t => t.pairId === r?.pair_id)?.name || 'A twin'
+
+      setModelSaid({
+        failed: results.filter(r => r?.state === 'failed').map(r => ({ name: nameFor(r), why: plainText(r?.why, 200) })),
+        model,
+        set: results.filter(r => r?.state === 'set' || r?.state === 'same').map(nameFor)
+      })
+      refreshAll()
+    }
+
+    setSince(Math.floor(Date.now() / 1000) - 5)
+    setWatch('on')
+    setPhase('instructions')
+  }
+
+  async function copyRequest() {
+    setCopied(await copyText(request))
+  }
+
+  async function readFiles(list) {
+    const picked = Array.from(list ?? []).slice(0, BATCH_FILES)
+
+    if (picked.length === 0) {
+      return
+    }
+
+    const sent = []
+    const bad = []
+
+    for (const f of picked) {
+      const name = clean(f?.name, 120) || 'A file'
+
+      try {
+        sent.push({ name, text: await exportTextOf(f) })
+      } catch (err) {
+        bad.push(`${name}: ${asProblem(err).message}`)
+      }
+    }
+
+    setProblem(bad.join(' '))
+
+    if (sent.length === 0) {
+      return
+    }
+
+    const res = await run('import', () => post('/batch/import', { files: sent, pair_ids: chosenIds }), 'Could not bring in those files')
+
+    if (res) {
+      const results = listOf(res.results)
+      const used = new Set(results.map(r => clean(r?.file, 120)).filter(Boolean))
+
+      setUnmatched(sent.filter(f => !used.has(f.name)).length)
+      took(results)
+    }
+  }
+
+  // Hermes does the Grok part in a chat of its own: only after the owner has read what it will do, ticked that
+  // they approve each step, and pressed Start. The message goes into the new chat's box; Send is the owner's.
+  async function startGrokPart() {
+    const res = await run('grok', () => post('/batch/grok-part', { pair_ids: chosenIds }), 'Could not hand the Grok part to Hermes')
+
+    if (!res) {
+      return
+    }
+
+    if (res.ok !== true) {
+      setCuNow(res.status && typeof res.status === 'object' ? res.status : { available: false, enable: [] })
+
+      return
+    }
+
+    const message = typeof res.message === 'string' ? res.message.slice(0, 8000) : ''
+    const canDraft = typeof host.composer?.setDraft === 'function'
+    const onClipboard = await copyText(message)
+
+    if (!onClipboard && !canDraft) {
+      setHanded(message)
+
+      return
+    }
+
+    // (the page goes with the new chat: the Twins page opens this sheet again at the watching step)
+    rememberBatch(storage, chosenIds, since)
+    setHandedOff(true)
+    setPhase('instructions')
+
+    if (typeof host.newChat === 'function') {
+      host.newChat()
+    } else {
+      host.navigate('/')
+    }
+
+    let put = false
+
+    if (canDraft) {
+      await pause(400)
+
+      try {
+        put = (await host.composer.setDraft(null, message)) === true
+      } catch {
+        put = false
+      }
+    }
+
+    host.notify({
+      durationMs: 30_000,
+      id: `${ID}:grok-part`,
+      kind: 'info',
+      message: put ? 'The request is in the new chat' : 'Paste it into the new chat',
+      meta: `${put ? 'Read it, then press Send.' : 'It is copied.'} Every click in Grok asks you first: answer Once each time. Stop it with Stop or /stop.`
+    })
+  }
+
+  const hover = e => {
+    e.preventDefault()
+    setOver(true)
+  }
+  const nameList = listWords(chosen.map(t => t.name))
+  const said = problem && el('p', { className: 'text-xs text-(--ui-text-primary)', key: 'said', role: 'alert' }, problem)
+
+  let title
+  let description
+  let body
+  let footer
+
+  if (phase === 'choose') {
+    // ── which twins, and one model for them ──
+    if (one && made.length === 1) {
+      title = `${owned(one.name)} twin is made.`
+      description = `It needs ${needWords(one.left)}.`
+    } else {
+      const same = needing.every(t => t.left.join() === needing[0]?.left.join())
+
+      title = `${made.length} twins made.`
+      description =
+        needing.length === made.length && same
+          ? `Each needs ${needWords(needing[0]?.left ?? [])}.`
+          : one
+            ? `${one.name} needs ${needWords(one.left)}; the others have everything.`
+            : 'Each line says what that twin still needs.'
+    }
+
+    const solo = needing.length === 1
+
+    body = el(
+      'div',
+      { className: 'flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1' },
+      q.isError && jsx(InlineProblem, { error: q.error, onRetry: () => void q.refetch() }),
+      !solo &&
+        el(
+          'div',
+          { 'aria-label': 'Twins to set up now', className: 'flex flex-col', role: 'group' },
+          needing.map(t =>
+            jsx(
+              CheckRow,
+              {
+                checked: ticked[t.pairId] !== false,
+                detail: `Needs ${needWords(t.left)}`,
+                disabled: Boolean(busy),
+                id: `batch-${t.pairId}`,
+                label: t.name,
+                onChange: v => setTicked({ ...ticked, [t.pairId]: v }),
+                title: t.name
+              },
+              t.pairId
+            )
+          )
+        ),
+      (anyModelLeft || models.length > 0 || endpoints.length > 0) &&
+        el(
+          'section',
+          { className: 'flex flex-col gap-1' },
+          el('label', { className: HEADING, htmlFor: 'batch-model' }, 'Model'),
+          (endpoints.length > 0 || models.length > 0) &&
+            el(
+              'select',
+              {
+                'aria-label': 'Choose a model',
+                className: 'h-8 rounded-md border border-(--ui-border) bg-transparent px-2 text-sm text-(--ui-text-primary)',
+                disabled: Boolean(busy),
+                id: 'batch-model-pick',
+                onChange: e => {
+                  const v = String(e.target.value || '')
+                  const [kind, a, b] = v.split('\u0000')
+
+                  if (kind === 'e') {
+                    setEndpointPick({ model: b, name: a })
+                    setTypedModel(b)
+                  } else if (kind === 'm') {
+                    setEndpointPick(null)
+                    setTypedModel(a)
+                  }
+                },
+                value: endpointName ? `e\u0000${endpointName}\u0000${model}` : models.includes(model) ? `m\u0000${model}` : ''
+              },
+              el('option', { value: '' }, 'Type a model name below'),
+              endpoints.length > 0 &&
+                el(
+                  'optgroup',
+                  { label: 'Model servers set up in Hermes' },
+                  endpoints.flatMap(e =>
+                    e.models.map(m =>
+                      el(
+                        'option',
+                        { key: `${e.name}\u0000${m}`, value: `e\u0000${e.name}\u0000${m}` },
+                        `${e.name}${e.local ? ' (local)' : ''} - ${m}${e.reachable ? '' : ' (not answering now)'}`
+                      )
+                    )
+                  )
+                ),
+              models.length > 0 &&
+                el('optgroup', { label: 'Models already in use' }, models.map(m => el('option', { key: m, value: `m\u0000${m}` }, m)))
+            ),
+          jsx(Input, {
+            'aria-label': solo ? `Model for ${one?.name ?? 'this twin'}` : 'Model for the ticked twins',
+            disabled: Boolean(busy),
+            id: 'batch-model',
+            list: 'batch-models',
+            maxLength: 120,
+            onChange: e => {
+              setEndpointPick(null)
+              setTypedModel(e.target.value)
+            },
+            placeholder: 'Type a model name',
+            spellCheck: false,
+            value: typedModel ?? defaultModel
+          }),
+          el('datalist', { id: 'batch-models' }, models.map(m => el('option', { key: m, value: m }))),
+          el(
+            'p',
+            { className: SMALL },
+            anyModelLeft
+              ? solo
+                ? 'Its model can be changed later.'
+                : "Used for every ticked twin. Each twin's model can be changed later."
+              : solo
+                ? 'It has a model already; change it here only to use another. It can be changed later too.'
+                : "They have a model already; change it here only to use another. Each twin's model can be changed later."
+          ),
+          el(
+            'p',
+            { className: SMALL },
+            'Grok Bot Twin never downloads a model. To use a model server you already run (for example on your own network), add it as a custom endpoint: run ',
+            el('code', null, 'hermes model'),
+            ' or set it under Settings, then Model, in Hermes Desktop.'
+          )
+        )
+    )
+
+    const none = chosen.length === 0
+
+    footer = [
+      el(Button, { disabled: Boolean(busy), key: 'later', onClick: onClose, variant: 'ghost' }, 'Later'),
+      el(
+        Button,
+        { disabled: Boolean(busy) || none, key: 'one', onClick: () => (onOneAtATime ? onOneAtATime(chosen[0].pairId) : onClose()), variant: 'secondary' },
+        solo ? 'Step by step' : 'One at a time'
+      ),
+      el(Button, { disabled: Boolean(busy) || none || !info, key: 'all', loading: busy === 'model', onClick: () => void doAll() }, solo ? 'Do it now' : 'Do all ticked now')
+    ]
+  } else if (phase === 'grok') {
+    // ── Hermes does the Grok part: what it will do, and the owner's word first ──
+    const cu = cuNow ?? (cuQ.data && typeof cuQ.data === 'object' ? cuQ.data : null)
+    const enable = listOf(cu?.enable).map(s => plainText(s, 240)).filter(Boolean).slice(0, 8)
+    const each = chosen.length === 1 ? `${chosen[0].name}'s chat` : 'the chat of each ticked bot'
+
+    title = 'Let Hermes do the Grok part'
+
+    if (!cu && cuQ.isError) {
+      description = 'Hermes could not tell whether it can use the Grok app here.'
+      body = jsx(InlineProblem, { error: cuQ.error, onRetry: () => void cuQ.refetch() })
+    } else if (!cu) {
+      description = 'Looking at what Hermes may use on this computer.'
+      body = jsx(LinesSkeleton, { rows: 3 })
+    } else if (cu.available !== true) {
+      description = 'Hermes needs a few things switched on first.'
+      body = el(
+        'div',
+        { className: 'flex flex-col gap-2' },
+        el('ul', { 'aria-label': 'What to switch on', className: cn(BODY, 'flex list-disc flex-col gap-1 pl-5') }, (enable.length > 0 ? enable : ['Hermes cannot use other apps on this computer yet.']).map((s, i) => el('li', { key: i }, s))),
+        el('p', { className: SMALL }, 'Nothing is lost meanwhile: go back and paste the request yourself.')
+      )
+    } else if (handed) {
+      description = 'Copy this message into a new Hermes chat.'
+      body = el(
+        'div',
+        { className: 'flex flex-col gap-2' },
+        el('pre', { className: cn(PRE, 'max-h-40 select-all'), tabIndex: 0 }, handed),
+        el('div', {}, jsx(CopyButton, { appearance: 'button', buttonVariant: 'secondary', label: 'Copy', showLabel: true, text: handed }))
+      )
+    } else {
+      description = 'Read this before anything starts.'
+      body = el(
+        'div',
+        { className: 'flex flex-col gap-3' },
+        el(
+          'section',
+          { 'aria-label': 'What Hermes will do', className: cn(NOTE, 'flex flex-col gap-1.5') },
+          el('h3', { className: HEADING }, 'Before Hermes starts'),
+          el(
+            'ul',
+            { className: 'flex list-disc flex-col gap-1 pl-5' },
+            el('li', {}, `In a new Hermes chat, Hermes opens ${each} in the Grok app, pastes the request and saves the answer to your Downloads folder.`),
+            el('li', {}, 'Every click asks you first: answer Once each time.'),
+            el('li', {}, "Screenshots of the Grok window go to this chat's model provider."),
+            el('li', {}, 'You can stop it at any time with Stop, or by typing /stop.')
+          )
+        ),
+        jsx(CheckRow, { checked: consent, disabled: Boolean(busy), id: 'batch-consent', label: 'I will approve each step myself', onChange: setConsent, title: 'I will approve each step myself' })
+      )
+    }
+
+    footer = [
+      el(Button, { disabled: Boolean(busy), key: 'back', onClick: () => { setPhase('instructions'); setCuNow(null); setHanded('') }, variant: cu?.available === true && !handed ? 'ghost' : 'default' }, 'Back'),
+      cu && cu.available !== true && el(Button, { disabled: Boolean(busy) || cuQ.isFetching, key: 'again', onClick: () => { setCuNow(null); void cuQ.refetch() }, variant: 'secondary' }, 'Look again'),
+      cu?.available === true && !handed && el(Button, { disabled: Boolean(busy) || !consent, key: 'start', loading: busy === 'grok', onClick: () => void startGrokPart() }, 'Start in a new Hermes chat')
+    ].filter(Boolean)
+  } else {
+    // ── the instructions: one request, pasted into each bot's chat; the files come back by themselves ──
+    const solo = chosen.length === 1
+    const routinesIn = chosen.reduce((n, t) => n + (got[t.pairId]?.state === 'done' ? got[t.pairId].routines : 0), 0)
+    const modelLeft = chosen.filter(t => t.left.includes('model') && !(modelSaid?.set ?? []).includes(t.name))
+
+    if (allDone) {
+      title = solo ? `${chosen[0].name} has its instructions.` : `All ${chosen.length} twins have their instructions.`
+      description = modelLeft.length > 0 ? `${listWords(modelLeft.map(t => t.name))} still ${modelLeft.length === 1 ? 'needs' : 'need'} a model: choose it in Hermes.` : solo ? 'It follows Grok from now on.' : 'They follow Grok from now on.'
+    } else {
+      title = solo ? `Instructions for ${chosen[0].name}` : `Instructions for ${chosen.length} twins`
+      description = solo ? 'Ask the bot in Grok once; Hermes brings in its answer.' : 'Ask each bot in Grok once; Hermes brings in their answers.'
+    }
+
+    const progress = el(
+      'ul',
+      { 'aria-label': 'Progress', className: 'flex flex-col gap-1.5', role: 'status' },
+      chosen.map(t => {
+        const lines = batchLines(t.name, got[t.pairId], already(t))
+        const waiting = !doneFor(t) && got[t.pairId]?.state !== 'sample'
+
+        return el(
+          'li',
+          { className: 'flex min-w-0 items-start gap-2', key: t.pairId },
+          jsx(Icon, { className: 'mt-1 text-(--ui-text-secondary)', name: doneFor(t) ? 'pass-filled' : got[t.pairId]?.state === 'failed' ? 'warning' : 'circle-large-outline' }),
+          el(
+            'div',
+            { className: 'flex min-w-0 flex-1 flex-col' },
+            el('span', { className: 'break-words text-[0.8125rem] text-(--ui-text-primary)' }, lines[0]),
+            lines.slice(1).map((line, i) => el('span', { className: SMALL, key: i }, line))
+          ),
+          waiting && el(Button, { 'aria-label': `Paste ${owned(t.name)} instructions yourself instead`, disabled: Boolean(busy), onClick: () => setAside({ kind: 'finish', pairId: t.pairId }), variant: 'text' }, 'Paste it yourself instead')
+        )
+      })
+    )
+    const modelLine =
+      modelSaid &&
+      el(
+        'div',
+        { className: 'flex flex-col gap-0.5' },
+        modelSaid.set.length > 0 && el('p', { className: BODY }, `Model ${clean(modelSaid.model, 120)} set for ${listWords(modelSaid.set)}.`),
+        modelSaid.failed.map((f, i) => el('p', { className: cn(BODY, 'text-(--ui-text-primary)'), key: i }, `${f.name}: the model was not set. ${f.why || 'Choose it in Hermes.'}`))
+      )
+    // (for a ticked twin that has no skill sync yet: it joins through the shared folder that is set up already)
+    const syncFor = syncIds.length === 0 ? null : (chosen.find(t => !syncIds.includes(t.pairId)) ?? chosen.find(t => syncIds.includes(t.pairId)))?.pairId ?? null
+
+    if (allDone) {
+      body = el(
+        'div',
+        { className: 'flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1' },
+        modelLine,
+        progress,
+        routinesIn > 0 && el('p', { className: SMALL }, 'Routines stay switched off until you choose Move routines to Hermes in a twin\'s "…" menu.')
+      )
+      footer = [el(Button, { key: 'done', onClick: close }, 'Done')]
+    } else {
+      const askSaid = copied === true ? (solo ? `Copied. Paste it into ${owned(chosen[0].name)} chat in Grok.` : "Copied. Paste it into each bot's chat in Grok.") : copied === false ? 'Copy this yourself:' : null
+
+      body = el(
+        'div',
+        {
+          className: 'flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1',
+          // a file let go anywhere on the sheet is read like one let go on the box
+          onDragOver: e => e.preventDefault(),
+          onDrop: e => {
+            e.preventDefault()
+            setOver(false)
+            void readFiles(e.dataTransfer?.files)
+          }
+        },
+        modelLine,
+        handedOff &&
+          el(
+            'div',
+            { className: cn(NOTE, 'flex flex-wrap items-center gap-2') },
+            el('span', { className: 'min-w-0 flex-1 text-(--ui-text-primary)', role: 'status' }, 'Hermes is doing the Grok part in another chat. Files it saves to Downloads are picked up here.'),
+            el(Button, { disabled: Boolean(busy), loading: busy === 'stop', onClick: () => void stopHermes(), variant: 'text' }, 'Stop Hermes')
+          ),
+        el(
+          'ol',
+          { 'aria-label': 'What to do in Grok', className: cn(BODY, 'flex list-decimal flex-col gap-2 pl-5') },
+          el(
+            'li',
+            {},
+            el(
+              'div',
+              { className: 'flex flex-wrap items-center gap-2' },
+              el(Button, { disabled: !request || Boolean(busy), onClick: () => void copyRequest(), variant: copied === true ? 'secondary' : 'default' }, 'Copy the request'),
+              askSaid && el('span', { className: SMALL, role: 'status' }, askSaid)
+            ),
+            copied === false && request && el('div', { className: 'mt-2 flex flex-col gap-1' }, el('pre', { className: cn(PRE, 'max-h-40 select-all'), tabIndex: 0 }, request), el('div', {}, jsx(CopyButton, { appearance: 'button', buttonVariant: 'secondary', label: 'Copy', showLabel: true, text: request })))
+          ),
+          el('li', {}, solo ? `Paste it into ${owned(chosen[0].name)} chat in Grok.` : 'Paste it into the chat of each ticked bot in Grok.'),
+          el('li', {}, viaMirror
+            ? (solo ? 'The bot also saves its file in the shared box folder, and skill sync brings it here. Or save its answer file to your Downloads folder.' : 'Each bot also saves its file in the shared box folder, and skill sync brings it here. Or save each answer file to your Downloads folder.')
+            : (solo ? 'Save its answer file to your Downloads folder.' : 'Save each answer file to your Downloads folder.'))
+        ),
+        el(
+          'div',
+          { className: cn(NOTE, 'flex flex-wrap items-center gap-2') },
+          el(
+            'span',
+            { className: 'min-w-0 flex-1', role: 'status' },
+            watch === 'on'
+              ? viaMirror
+                ? "Watching the shared folder and Downloads. A file saved in the box arrives after the sync bot's next run, which can take a while."
+                : downloadsHere
+                ? 'Watching your Downloads folder: each answer file is brought in as it lands.'
+                : 'Hermes cannot see a Downloads folder here: drop the files below instead.'
+              : scanProblem
+                ? `Stopped watching. ${scanProblem.message}`
+                : 'Stopped watching after 15 minutes.'
+          ),
+          watch !== 'on' && el(Button, { disabled: Boolean(busy), onClick: watchAgain, variant: 'secondary' }, 'Watch again')
+        ),
+        progress,
+        unmatched > 0 && el('p', { className: SMALL, role: 'status' }, `${plural(unmatched, 'file')} ${unmatched === 1 ? 'was' : 'were'} not from a ticked bot.`),
+        el(
+          'div',
+          {
+            'aria-label': 'Drop the answer files here',
+            className: cn('flex flex-col items-center gap-2 rounded-lg border-2 border-dashed px-4 py-4 text-center', over ? 'border-(--ui-text-secondary) bg-(--ui-bg-quinary)' : 'border-(--ui-stroke-secondary)'),
+            onDragEnter: hover,
+            onDragLeave: e => {
+              if (!e.currentTarget?.contains?.(e.relatedTarget)) {
+                setOver(false)
+              }
+            },
+            onDragOver: hover,
+            onDrop: e => {
+              e.preventDefault()
+              e.stopPropagation?.()
+              setOver(false)
+              void readFiles(e.dataTransfer?.files)
+            },
+            role: 'group'
+          },
+          el('h3', { className: HEADING, role: over ? 'status' : undefined }, over ? 'Drop them here' : 'Or drop the answer files here'),
+          el('input', {
+            accept: '.json,.txt,.md,application/json,text/plain,text/markdown',
+            'aria-hidden': true,
+            className: 'hidden',
+            multiple: true,
+            onChange: e => {
+              const list = Array.from(e.target.files ?? [])
+
+              // (so that choosing the same files again is a change too)
+              e.target.value = ''
+              void readFiles(list)
+            },
+            ref: picker,
+            tabIndex: -1,
+            type: 'file'
+          }),
+          el(Button, { disabled: Boolean(busy), loading: busy === 'import', onClick: () => picker.current?.click?.(), variant: 'secondary' }, 'Choose files…')
+        ),
+        said,
+        el('p', { className: SMALL }, privacy),
+        el(
+          'div',
+          { className: 'flex flex-wrap gap-2' },
+          el(Button, { disabled: Boolean(busy) || chosenIds.length === 0, onClick: () => setPhase('grok'), variant: 'text' }, 'Let Hermes do the Grok part'),
+          syncFor && el(Button, { disabled: Boolean(busy), onClick: () => setAside({ kind: 'sync', pairId: syncFor }), variant: 'text' }, 'Keep their skills the same with Skill sync…')
+        )
+      )
+      footer = [el(Button, { disabled: Boolean(busy), key: 'later', onClick: close, title: 'Watching stops when this closes. Each twin keeps what is left in its row.', variant: 'ghost' }, 'Later')]
+    }
+  }
+
+  const asidePair = aside ? pairNow(aside.pairId) : null
+  const asideSheet =
+    asidePair &&
+    (aside.kind === 'sync'
+      ? jsx(SkillSyncSheet, { onClose: () => setAside(null), open: true, pair: asidePair, storage }, 'aside')
+      : jsx(FinishSheet, { onClose: () => setAside(null), open: true, pair: asidePair, storage }, 'aside'))
+
+  return el(Sheet, { description, footer, locked: Boolean(busy), onClose: close, open, title, wide: true }, ...many(body), asideSheet)
 }
 
 // ── sample ──────────────────────────────────────────────────────────────────
@@ -8927,6 +9711,8 @@ function TwinsPage({ storage, initialBack = 'idle', initialMountedAt = null }) {
   const [stopped, setStopped] = useState(null) // what became of a twin that was just stopped (see StoppedLine)
   const [removed, setRemoved] = useState(() => storage?.get(REMOVED_KEY, null) ?? null)
   const [back, setBack] = useState(initialBack) // 'idle' | 'going' | 'done' | 'failed'
+  // a batch handed to Hermes for the Grok part less than half an hour ago: its sheet opens again (BATCH_KEY)
+  const [openBatch, setOpenBatch] = useState(() => openBatchOf(storage))
   const mountedAt = useRef(initialMountedAt ?? Date.now())
   const titleRef = useRef(null)
 
@@ -9350,6 +10136,20 @@ function TwinsPage({ storage, initialBack = 'idle', initialMountedAt = null }) {
         problem: flowProblem,
         ready: setupReady && data?.setup?.ready === true && data?.setup?.grok_app_found !== false,
         reconnect: flow === 'reconnect',
+        storage
+      }),
+    openBatch &&
+      !flow &&
+      pairs.some(p => openBatch.ids.includes(p?.pair_id)) &&
+      jsx(BatchSheet, {
+        onClose: () => setOpenBatch(null),
+        onOneAtATime: pairId => {
+          setOpenBatch(null)
+          setRequest({ pairId, sheet: 'finish' })
+        },
+        open: true,
+        pairs: pairs.filter(p => openBatch.ids.includes(p?.pair_id)),
+        resumed: openBatch,
         storage
       }),
     sheet === 'privacy' && jsx(PrivacySheet, { onClose: () => setSheet(null), open: true }),

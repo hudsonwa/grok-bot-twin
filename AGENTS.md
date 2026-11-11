@@ -64,6 +64,11 @@ Add `--json` to `--check` or `--plan` for a machine-readable answer.
      on the computer, so setup cannot copy them.
    - Choosing a model for a twin that has none. A new twin takes the model of your owner's other Hermes
      chats; only when there is none does the Twins page ask them to choose one.
+   For several new twins, you may help with both once your owner said yes to it: `hermes twin finish --all
+   --model MODEL` gives them one model and prints the request your owner pastes into each bot's chat in Grok;
+   when the answer files are in their Downloads folder, `hermes twin import-exports ~/Downloads --show` shows
+   what would be imported, and after their yes the same line with `--yes` imports it. Never paste into Grok
+   yourself.
    - Signing in to anything.
 
 ### A second computer

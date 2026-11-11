@@ -307,6 +307,105 @@ async def setup_export(pid: str, body: Any = Body(None)) -> Any:
     return await _call(svc.import_setup, _pid(pid), text, apply, b.get("bot"), b.get("skip"))
 
 
+# ---- several twins at once: their model and their setup exports ---------------------------------------------
+_BATCH_FILES_MAX = 40
+
+
+def _pid_list(value: Any) -> Any:
+    """A list of twin ids from a body (None stays None: every twin). Anything else is refused before the service."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) > 200 or not all(isinstance(p, str) for p in value):
+        raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
+    return [_pid(p) for p in value]
+
+
+def _too_many_files(files: Any) -> Any:
+    """The error envelope for a drop the service would refuse anyway (checked here before any text is passed on)."""
+    if isinstance(files, list) and (len(files) > _BATCH_FILES_MAX or any(
+            isinstance(f, dict) and isinstance(f.get("text"), str) and len(f["text"]) > _EXPORT_TEXT_CAP
+            for f in files)):
+        return {"error": {"code": "too_large", "message": "Drop at most 40 setup export files, each under 2 MB.",
+                          "hint": "Ask each bot for its setup only: instructions, routines and connector names."}}
+    return None
+
+
+@router.get("/batch")
+async def batch_info(pair_ids: str | None = Query(None, max_length=20000)) -> Any:
+    """What the sheet for several new twins shows: the request to paste into each bot's chat, the models in use,
+    each twin's model and what it still needs, whether Downloads is there (never its path)."""
+    pids = None if pair_ids is None else _pid_list([p for p in pair_ids.split(",") if p])
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.batch_info, pids)
+
+
+@router.post("/batch/model")
+async def batch_model(body: Any = Body(None)) -> Any:
+    """{"pair_ids", "model"}: the same model for every ticked twin (each in its own config.yaml)."""
+    b = _body(body)
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.batch_models, _pid_list(b.get("pair_ids")), b.get("model"), b.get("endpoint"))
+
+
+@router.post("/pairs/{pid}/model")
+async def pair_model(pid: str, body: Any = Body(None)) -> Any:
+    """{"model"}: this twin's model, written into its own config.yaml (never the default profile's)."""
+    b = _body(body)
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.set_model, _pid(pid), b.get("model"), "owner", None, b.get("endpoint"))
+
+
+@router.post("/batch/match")
+async def batch_match(body: Any = Body(None)) -> Any:
+    """{"files": [{"name", "text"}], "pair_ids"}: which twin each dropped file is for. Nothing is kept."""
+    b = _body(body)
+    too = _too_many_files(b.get("files"))
+    if too:
+        return too
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.batch_match, b.get("files"), _pid_list(b.get("pair_ids")))
+
+
+@router.post("/batch/import")
+async def batch_import(body: Any = Body(None)) -> Any:
+    """{"files": [{"name", "text"}], "pair_ids"}: import each file into the twin it is for. The texts are not
+    stored, logged or sent anywhere; memories and facts about the owner are left out."""
+    b = _body(body)
+    too = _too_many_files(b.get("files"))
+    if too:
+        return too
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.batch_import, b.get("files"), _pid_list(b.get("pair_ids")))
+
+
+@router.post("/batch/downloads")
+async def batch_downloads(body: Any = Body(None)) -> Any:
+    """{"since", "pair_ids", "apply"}: setup exports saved to Downloads since then, imported into the ticked twins
+    (apply defaults to true). The page asks every 4 s while it watches."""
+    b = _body(body)
+    apply = b.get("apply", True)
+    if not isinstance(apply, bool):
+        raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.downloads_scan, b.get("since"), _pid_list(b.get("pair_ids")), apply)
+
+
+@router.get("/batch/computer-use")
+async def batch_computer_use() -> Any:
+    svc = await asyncio.to_thread(_svc)
+    return await _call(svc.computer_use_status)
+
+
+@router.post("/batch/grok-part")
+async def batch_grok_part(body: Any = Body(None)) -> Any:
+    """{"pair_ids"}: let Hermes do the Grok part for these twins (when computer use is set up); {"stop": true}."""
+    b = _body(body)
+    svc = await asyncio.to_thread(_svc)
+    if _bool(b, "stop"):
+        return await _call(svc.grok_part_stop)
+    return await _call(svc.grok_part_handoff, _pid_list(b.get("pair_ids")))
+
+
 @router.post("/pairs/{pid}/send-to-grok")
 async def send_to_grok(pid: str) -> Any:
     svc = await asyncio.to_thread(_svc)

@@ -51,6 +51,9 @@ SETUP_EXPORT = json.dumps({"format": "grok-bot-export", "version": 1, "bots": [{
                   "schedule_cron": "0 8 * * 1-5", "timezone": "UTC"},
                  {"name": "Ticket arrives", "instruction": "Triage it.", "trigger": "event"}],
     "apps": [{"name": "Widget Desk"}]}]})
+# an export of an invented bot no twin is for (the several-twins sheet: matched to nothing, imported nowhere)
+SCOUT_EXPORT = json.dumps({"format": "grok-bot-export", "version": 1, "bots": [{
+    "name": "Test Scout", "instructions": "You are an invented scout.", "memories": [], "user_facts": []}]})
 
 # ---- the spec language (the same few rules are implemented again in tests/desktop/contract.mjs) -----------------
 # A type is: str | int | number | bool | null | dict | list | any, a shape name, list[TYPE], or a union "A|B".
@@ -203,6 +206,20 @@ def _per_twin(api: Api, pid: str, folder: Path | None) -> dict:
         "setup_export_info": api.get(f"/pairs/{pid}/setup-export"),
         "setup_export": api.post(f"/pairs/{pid}/setup-export", {"text": SETUP_EXPORT}),
         "error_not_an_export": api.post(f"/pairs/{pid}/setup-export", {"text": "hello"}),
+        # several twins at once: the sheet, a model for the ticked twins, files matched and imported, Downloads
+        "batch_info": api.get(f"/batch?pair_ids={pid}"),
+        "batch_match": api.post("/batch/match", {"files": [{"name": "acme.json", "text": SETUP_EXPORT},
+                                                           {"name": "notes.txt", "text": "hello"}],
+                                                 "pair_ids": [pid]}),
+        "batch_import": api.post("/batch/import", {"files": [{"name": "scout.json", "text": SCOUT_EXPORT}],
+                                                   "pair_ids": [pid]}),
+        "batch_downloads": api.post("/batch/downloads", {"since": 0, "pair_ids": [pid]}),
+        "computer_use": api.get("/batch/computer-use"),
+        # (no computer use in a test: the answer says what to enable, and nothing is handed over)
+        "grok_part": api.post("/batch/grok-part", {"pair_ids": [pid]}),
+        "batch_models": api.post("/batch/model", {"pair_ids": [pid], "model": "test-model-1"}),
+        "set_model": api.post(f"/pairs/{pid}/model", {"model": "test-model-2"}),
+        "error_bad_model": api.post(f"/pairs/{pid}/model", {"model": "not a model"}),
     }
     # a skill changed in Hermes and waiting to go to Grok: its text, for the owner to paste there by hand
     waiting = [w["item"] for w in _pair_of(api.get("/status"), pid)["waiting"] if w["item"].startswith("skill:")]
@@ -392,6 +409,10 @@ ROUTES = {
     "error_secret_paste": "ErrorEnvelope", "instructions_accepted": "Instructions", "instructions": "Instructions",
     "restore_points_after_paste": "RestorePoints", "skill_text": "SkillText", "error_no_such_skill": "ErrorEnvelope",
     "setup_export_info": "SetupExportInfo", "setup_export": "SetupExport", "error_not_an_export": "ErrorEnvelope",
+    "batch_info": "BatchInfo", "batch_match": "BatchMatch", "batch_import": "BatchImport",
+    "batch_downloads": "BatchDownloads", "computer_use": "ComputerUse", "grok_part": "GrokPart",
+    "batch_models": "BatchModels",
+    "set_model": "SetModel", "error_bad_model": "ErrorEnvelope",
     # twins on the owner's other computers (the sharing contract, local routes). The real answers of these routes are
     # checked against the same shapes in tests/test_fleet_units.py and tests/test_fleet_machines.py, which run
     # the sharing and the linked machine for real; the page's demo mock in tests/test_mock_contract.py.
@@ -443,7 +464,9 @@ COMPARED = ("pair", "setup", "grok_bots", "preview", "create", "conflicts", "che
             "events", "error_unknown_twin", "error_bad_input", "error_bad_demo", "error_bad_item",
             "error_bad_conflict", "approve", "resolve", "restore", "send_to_grok", "switch", "switch_undo",
             "error_secret_paste", "instructions_accepted", "instructions", "restore_points_after_paste",
-            "skill_text", "error_no_such_skill", "setup_export_info", "setup_export", "error_not_an_export")
+            "skill_text", "error_no_such_skill", "setup_export_info", "setup_export", "error_not_an_export",
+            "batch_info", "batch_match", "batch_import", "batch_downloads", "computer_use", "batch_models",
+            "set_model", "error_bad_model")
 
 
 WHEN_THERE = ("approve", "resolve", "restore", "skill_text")

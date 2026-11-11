@@ -24,6 +24,7 @@ from .connect import CAUSE_ERROR_CODES, BadInput, ConnectMixin
 from .demo import DemoEngine, unique_profile
 from .finish import REPLACED_BY, FinishMixin
 from .setup_export import SetupExportMixin
+from .batch import BatchMixin
 from .fleet_api import FleetMixin
 from .skill_sync import SkillSyncMixin
 from .routines import RoutinesMixin
@@ -197,7 +198,8 @@ def select_engine(pair_id: Optional[str], demo: DemoEngine, botport: Optional[Bo
     return botport
 
 
-class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, FleetMixin, TasksMixin, SkillSyncMixin, RoutinesMixin):
+class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, FleetMixin, TasksMixin, SkillSyncMixin,
+                  RoutinesMixin):
     def __init__(self) -> None:
         self.ctx: Any = None
         self.demo = DemoEngine()

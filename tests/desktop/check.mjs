@@ -181,7 +181,7 @@ const testable = source
   // Harness-only: every open confirmation is recorded with its props (its labels and what confirming does).
   .replace('function Confirm({ open,', 'function Confirm(__p) { if (__p.open) globalThis.__h.confirms.push(__p); return __Confirm(__p) }\nfunction __Confirm({ open,')
   // Harness-only: expose inner components of the temp copy for direct renders.
-  .concat('\nexport const __parts = { ImportSheet, exportOf, leftOutWords, exportTextOf, AddFlow, ConnectStep, DetailsSheet, CopiesPanel, VersionsPanel, RecentPanel, FinishSheet, MoveSheet, TwinRow, StatusChip, TwinsPage, SkillSyncSheet, ShareSection, LinkSheet, LinkCode, FollowerView, FollowerRow, UnlinkDialog, UnlinkComputerDialog, RenameSheet, KeptBots, unlinkedHere, ComputerRow, Welcome, fleetOf, alsoOn, copiesDetail, codeChars, codeShown, codeLife, sinceWords, whenText, linkProblem, shareProblem, followerSummary, followerTrouble, briefSummary, unlinkedSentence, computerSentence, knownComputers, StopTwinningDialog, UninstallDialog, RemovedScreen, ElsewhereNow, WaitingBox, UnsentBox, ConflictItem, ConflictBox, SampleBanner, PrivacySheet, PreviewItem, VersionRow, previewLines, cronText, markDifferences, profileClash, reconcileConflictToasts, statusSentence, mattersOf, summarize, removedLines, followProblem, canMove, leftOf, checkedIso, differsBecause, goHome, SeeTwinSheet, SkillByHand, endSample, StoppedLine, awayFromHome, transportError, twinProfilesOf, homeOf, stepOutOfTwin, inSync, latestOf, onlyChanged, updateHint, RequestsSection, RequestsWaiting, BackendOff, Unreachable, InlineProblem, summarize, statusSentence, MissingBox, ErrorBox, hasMainAction, byHandWords, plainTrust, hereProblem, TwinError, rowTone, matchWords, blockedSentence, lineWords, whoWords, wasAsked, askedKey, attentionReason, handed , statusEvery, onAll, placeOf, WHERE_NEWS, plainActivity }\n')
+  .concat('\nexport const __parts = { BatchSheet, openBatchOf, mergeBatch, batchLines, needWords, ImportSheet, exportOf, leftOutWords, exportTextOf, AddFlow, ConnectStep, DetailsSheet, CopiesPanel, VersionsPanel, RecentPanel, FinishSheet, MoveSheet, TwinRow, StatusChip, TwinsPage, SkillSyncSheet, ShareSection, LinkSheet, LinkCode, FollowerView, FollowerRow, UnlinkDialog, UnlinkComputerDialog, RenameSheet, KeptBots, unlinkedHere, ComputerRow, Welcome, fleetOf, alsoOn, copiesDetail, codeChars, codeShown, codeLife, sinceWords, whenText, linkProblem, shareProblem, followerSummary, followerTrouble, briefSummary, unlinkedSentence, computerSentence, knownComputers, StopTwinningDialog, UninstallDialog, RemovedScreen, ElsewhereNow, WaitingBox, UnsentBox, ConflictItem, ConflictBox, SampleBanner, PrivacySheet, PreviewItem, VersionRow, previewLines, cronText, markDifferences, profileClash, reconcileConflictToasts, statusSentence, mattersOf, summarize, removedLines, followProblem, canMove, leftOf, checkedIso, differsBecause, goHome, SeeTwinSheet, SkillByHand, endSample, StoppedLine, awayFromHome, transportError, twinProfilesOf, homeOf, stepOutOfTwin, inSync, latestOf, onlyChanged, updateHint, RequestsSection, RequestsWaiting, BackendOff, Unreachable, InlineProblem, summarize, statusSentence, MissingBox, ErrorBox, hasMainAction, byHandWords, plainTrust, hereProblem, TwinError, rowTone, matchWords, blockedSentence, lineWords, whoWords, wasAsked, askedKey, attentionReason, handed , statusEvery, onAll, placeOf, WHERE_NEWS, plainActivity }\n')
   // Harness-only: the page counts itself as "on screen" in an effect, which a static render never runs.
   .concat('export const __hooks = { setPageOpen: n => { pageOpen = n }, clearPageToasts, setPageTitle: n => { pageTitle = n }, landFocus, lessMotion }\n')
 writeFileSync(join(work, 'plugin.mjs'), testable)
@@ -371,6 +371,36 @@ const exportDone = {
     { name: 'Evening recap', schedule: '0 20 * * *', timezone: '', prompt: 'Recap the day.', state: 'failed', why: 'not tried: an earlier one failed' }
   ]
 }
+// ── several new twins at once (the batch sheet): the answers of /batch and its routes (invented twins) ──
+const cuOff = { available: false, driver: false, toolset: false, approvals: true, enable: ['Install cua-driver, the small program Hermes uses to click in other apps.', 'In Hermes, open Settings, then Tools, and switch on Computer use.'], why: 'Computer use is not switched on.' }
+const cuOn = { available: true, driver: true, toolset: true, approvals: true, enable: [], why: '' }
+const batchInfo = {
+  request: EXPORT_REQUEST, privacy: EXPORT_PRIVACY, default_model: 'grok-4.7', models: ['grok-4.7', 'local-small'], endpoints: [{ name: 'Homebox', base_url_label: '127.0.0.1:8000', local: true, reachable: true, models: ['local-model'], provider: 'custom:homebox' }],
+  twins: [
+    { pair_id: 'trail-guide', name: 'Trail Guide', profile: 'trail-guide', left: ['instructions', 'model'], model: '', sample: false },
+    { pair_id: 'garden-notes', name: 'Garden Notes', profile: 'garden-notes', left: ['instructions', 'model'], model: '', sample: false },
+    { pair_id: 'book-club', name: 'Book Club', profile: 'book-club', left: ['instructions', 'model'], model: '', sample: false }
+  ],
+  pickup: { via: 'downloads', label: 'Downloads' },
+  downloads: { available: true, label: 'Downloads' }, skill_sync: { set_up: false, pair_ids: [] }, computer_use: cuOff
+}
+const batchModels = { results: [
+  { pair_id: 'trail-guide', name: 'Trail Guide', state: 'set', why: '' },
+  { pair_id: 'garden-notes', name: 'Garden Notes', state: 'set', why: '' },
+  { pair_id: 'book-club', name: 'Book Club', state: 'failed', why: 'Hermes could not write its settings file.' }
+] }
+// One look in Downloads: Trail Guide's file came in, Book Club's was not an export, Garden Notes' is still to come.
+const batchDownloads = { files: 2, waiting: ['garden-notes'], results: [
+  { pair_id: 'trail-guide', name: 'Trail Guide', file: 'trail-guide-setup.json', state: 'done', instructions: true, routines: 2, connectors: 1, lines_left_out: 1, why: '' },
+  { pair_id: 'garden-notes', name: 'Garden Notes', file: '', state: 'no_file', instructions: false, routines: 0, connectors: 0, lines_left_out: 0, why: '' },
+  { pair_id: 'book-club', name: 'Book Club', file: 'notes.txt', state: 'failed', instructions: false, routines: 0, connectors: 0, lines_left_out: 0, why: 'This file is not a setup export.' }
+] }
+const batchImport = { results: [
+  { pair_id: 'garden-notes', name: 'Garden Notes', file: 'garden-notes-setup.json', state: 'done', instructions: true, routines: 0, connectors: 0, lines_left_out: 0, why: '' },
+  { pair_id: 'book-club', name: 'Book Club', file: 'book-club-setup.json', state: 'done', instructions: true, routines: 0, connectors: 2, lines_left_out: 0, why: '' }
+] }
+const grokPartOk = { ok: true, message: 'Bring the setup of Trail Guide, Garden Notes and Book Club over from the Grok app.', status: cuOn }
+const grokPartOff = { ok: false, message: '', status: cuOff }
 const same = 'the same in Grok and Hermes'
 const differs = 'differs between Grok and Hermes'
 const fixtures = {
@@ -398,7 +428,9 @@ const fixtures = {
   fleet: fleetSource2,
   'unlink-plan': unlinkPlan,
   'unlink-computer-plan': unlinkSurfacePlan,
-  'setup-export': exportInfo
+  'setup-export': exportInfo,
+  batch: batchInfo,
+  'computer-use': cuOff
 }
 
 // ── 4. recording host / ctx ─────────────────────────────────────────────────
@@ -1115,7 +1147,7 @@ if (!haveReact) {
     render(jsx(P.AddFlow, { open: true, onClose: noop, ready: true, storage: ctx.storage }))
     ok(H.checks.filter(c => c.checked && !c.disabled).length === 0, 'connect for the first time with two bots: nothing is ticked for the owner')
     // (the page notes the place while the sheet is open, forgets it once a twin is made, and removal forgets it too)
-    ok(/storage\?\.set\?\.\(PLACE_KEY, \{ ids, step: step === 'confirm' \? 'confirm' : 'choose' \}\)/.test(source) && /if \(step === 'done' \|\| ids\.length === 0\) \{\n\s+storage\?\.remove\?\.\(PLACE_KEY\)/.test(source) && /\[NOTED_KEY, HOME_KEY, UNLINKED_KEY, PLACE_KEY\]/.test(source), 'connect: the place is noted while choosing, and forgotten when a twin is made or the plugin is removed')
+    ok(/storage\?\.set\?\.\(PLACE_KEY, \{ ids, step: step === 'confirm' \? 'confirm' : 'choose' \}\)/.test(source) && /if \(step === 'done' \|\| ids\.length === 0\) \{\n\s+storage\?\.remove\?\.\(PLACE_KEY\)/.test(source) && /\[NOTED_KEY, HOME_KEY, UNLINKED_KEY, PLACE_KEY, BATCH_KEY\]/.test(source), 'connect: the place is noted while choosing, and forgotten when a twin is made or the plugin is removed')
     // Every bot already has a twin: one sentence that says so and where more come from; no Continue that can
     // never be pressed, and no list of boxes that cannot be ticked.
     H.override['grok-bots'] = { data: { ...fixtures['grok-bots'], bots: fixtures['grok-bots'].bots.map(b => ({ ...b, twinned_pair_id: b.twinned_pair_id ?? 'trail-guide' })) } }
@@ -1201,40 +1233,214 @@ if (!haveReact) {
   html = text(render(jsx(P.AddFlow, { open: true, onClose: noop, ready: true, initialPreview: { pairs: [], skipped: [{ grok_id: 'b-garden-0003', name: 'Garden Buddy', reason: 'already_twinned' }], profiles_in_use: [] } })))
   ok(html.includes('Nothing new to twin') && html.includes('Left out: Garden Buddy (already has a twin)') && !/0 bots/.test(html) && !H.buttons.some(b => /^Twin /.test(b.text)) && has('Back'), `nothing to twin: ${html.slice(0, 200)}`)
 
-  // ── Started, not finished: a new twin has the name and the description, and the page says what is left ──
+  // ── After twinning: one sheet for every new twin (instructions and a model, for all of them at once) ──
   {
     const done = (created, props = {}) => render(jsx(P.AddFlow, { open: true, onClose: noop, ready: true, initialStep: 'done', initialCreated: created, ...props }))
-    const asked = []
-    H.newChats = []
-    raw = done([trail], { onFinish: id => asked.push(id) })
+    const batch = (props = {}) => render(jsx(P.BatchSheet, { onClose: noop, open: true, pairs: [trail, notes, club], storage: ctx.storage, ...props }))
+    const NO_FINISH = /\bstarted\b|\bfinish/i
+    const boxes = () => H.checks.filter(c => /^batch-/.test(c.id ?? '') && c.id !== 'batch-consent')
+
+    // Three twins made: one sheet, a box per twin (all ticked), one model, two ways on.
+    raw = done([trail, notes, club])
     html = text(raw)
-    ok(html.includes("Trail Guide's twin is started It has the name") && html.includes('It has the name and description. 2 things left, about a minute.') && !/now has a twin|keeps up with Grok|by itself from now on|Up to date|"…" menu/.test(html), `after twinning: started, with what is left (${html.slice(0, 200)})`)
-    // One twin: the title names it; the bot's picture and name are not repeated under it.
-    ok(count(html, 'Trail Guide') === 1 && !/size-9/.test(raw), 'after twinning (one twin): no second copy of the name under the title')
-    ok(JSON.stringify(primaries()) === JSON.stringify(['Finish setting up']) && variantOf('Later') === 'ghost' && variantOf('Open in Hermes') === 'ghost' && JSON.stringify(texts().slice(-3)) === JSON.stringify(['Later', 'Open in Hermes', 'Finish setting up']) && endsInButton(raw), `after twinning: Finish setting up is the one primary; the started twin can already be opened, quietly (${texts()})`)
-    await press('Finish setting up')
-    ok(JSON.stringify(asked) === JSON.stringify(['trail-guide']) && H.newChats.length === 0, 'Finish setting up hands the new twin to the page (which opens its sheet)')
-    // Today's backend does not say what is left: the page claims only what is true.
+    ok(html.includes('3 twins made.') && html.includes('Each needs its instructions and a model.') && !NO_FINISH.test(html), `after twinning three bots: the batch sheet (${html.slice(0, 200)})`)
+    ok(boxes().length === 3 && boxes().every(c => c.checked && !c.disabled) && JSON.stringify(boxes().map(c => c.label)) === JSON.stringify(['Trail Guide', 'Garden Notes', 'Book Club']), `batch: a ticked box per twin, named (${JSON.stringify(boxes().map(c => [c.label, c.checked]))})`)
+    ok(count(html, 'Needs its instructions and a model') === 3, 'batch: each twin says what it needs')
+    ok(JSON.stringify(primaries()) === JSON.stringify(['Do all ticked now']) && variantOf('One at a time') === 'secondary' && variantOf('Later') === 'ghost' && JSON.stringify(texts()) === JSON.stringify(['Later', 'One at a time', 'Do all ticked now']) && endsInButton(raw), `batch: Do all ticked now is the one primary, One at a time beside it (${texts()})`)
+    ok(!H.buttons.some(b => NO_FINISH.test(b.text ?? '') || NO_FINISH.test(b.label ?? '')), 'batch: no "started" or "Finish" on any button')
+    // One model for all of them: the one Hermes uses is chosen already, others can be typed.
+    const picker = H.inputs.find(i => i.id === 'batch-model')
+    ok(picker?.value === 'grok-4.7' && picker?.list === 'batch-models' && picker?.['aria-label'] === 'Model for the ticked twins' && raw.includes('<option value="local-small">') && html.includes("Each twin's model can be changed later."), `batch: the model picker starts at the model Hermes uses (${JSON.stringify(picker && { list: picker.list, value: picker.value })})`)
+    // Nothing is done by looking: no call but the page's own reads.
+    ok(H.restCalls.every(c => !/^\/batch\/(model|import|downloads|grok-part)/.test(c.path)), 'batch: opening the sheet changes nothing')
+    {
+      const asked = []
+      batch({ onOneAtATime: id => asked.push(id) })
+      await press('One at a time')
+      ok(JSON.stringify(asked) === JSON.stringify(['trail-guide']), 'One at a time hands the first ticked twin to the page (its own sheet, as before)')
+      // Unticked twins are left out.
+      batch({ initialTicked: { 'trail-guide': false }, onOneAtATime: id => asked.push(id) })
+      await press('One at a time')
+      ok(asked.at(-1) === 'garden-notes' && boxes()[0].checked === false, 'One at a time: the first twin that is still ticked')
+      batch({ initialTicked: { 'trail-guide': false, 'garden-notes': false, 'book-club': false } })
+      ok(H.buttons.find(b => b.text === 'Do all ticked now')?.disabled === true && H.buttons.find(b => b.text === 'One at a time')?.disabled === true, 'nothing ticked: both ways wait')
+    }
+    // Do all ticked now: the model goes to the ticked twins that have none, then the instructions step.
+    reset()
+    H.restReply = async path => (path === '/batch/model' ? batchModels : {})
+    batch()
+    await press('Do all ticked now')
+    ok(H.restCalls[0]?.path === '/batch/model' && H.restCalls[0]?.opts?.method === 'POST' && JSON.stringify(H.restCalls[0]?.opts?.body) === JSON.stringify({ model: 'grok-4.7', pair_ids: ['trail-guide', 'garden-notes', 'book-club'] }), `Do all ticked now sets the model on the ticked twins (${JSON.stringify(H.restCalls[0])})`)
+    // A twin that already has the owner's model is not touched (and its line names only its instructions).
+    H.override.batch = { data: { ...batchInfo, twins: batchInfo.twins.map(t => (t.pair_id === 'garden-notes' ? { ...t, left: ['instructions'], model: 'grok-4.7' } : t)) } }
+    reset()
+    html = text(batch({ initialTicked: { 'book-club': false } }))
+    ok(count(html, 'Needs its instructions and a model') === 2 && html.includes('Garden Notes Needs its instructions Book Club'), `batch: a twin with a model already needs only its instructions (${html.slice(0, 300)})`)
+    ok(html.includes('Each line says what that twin still needs.'), 'batch: twins that need different things: each line says what')
+    await press('Do all ticked now')
+    ok(JSON.stringify(H.restCalls[0]?.opts?.body) === JSON.stringify({ model: 'grok-4.7', pair_ids: ['trail-guide'] }), `the model only where it is missing, only for ticked twins (${JSON.stringify(H.restCalls[0]?.opts?.body)})`)
+    // ...unless the owner chose another model: then for every ticked twin.
+    reset()
+    batch({ initialModel: 'local-small' })
+    await press('Do all ticked now')
+    ok(JSON.stringify(H.restCalls[0]?.opts?.body) === JSON.stringify({ model: 'local-small', pair_ids: ['trail-guide', 'garden-notes', 'book-club'] }), `another model chosen: set on every ticked twin (${JSON.stringify(H.restCalls[0]?.opts?.body)})`)
+    // Two made, one with nothing left: only the one that needs something is named.
+    H.override.batch = { data: { ...batchInfo, twins: [batchInfo.twins[0], { ...batchInfo.twins[1], left: [], model: 'grok-4.7' }] } }
+    html = text(done([trail, { ...notes, setup_left: [] }]))
+    ok(html.includes('2 twins made.') && html.includes('Trail Guide needs its instructions and a model; the others have everything.') && boxes().length === 0 && has('Do it now'), `two made, one needs something: it is named (${html.slice(0, 200)})`)
+    H.override = {}
+
+    // One twin: its own wording, and only what is really left.
+    H.override.batch = { data: { ...batchInfo, twins: [batchInfo.twins[0]] } }
+    html = text(done([trail]))
+    ok(html.includes("Trail Guide's twin is made.") && html.includes('It needs its instructions and a model.') && boxes().length === 0 && JSON.stringify(texts()) === JSON.stringify(['Later', 'Step by step', 'Do it now']) && !NO_FINISH.test(html), `one twin made: named, what it needs, no box to tick (${texts()}; ${html.slice(0, 160)})`)
+    ok(H.inputs.find(i => i.id === 'batch-model')?.['aria-label'] === 'Model for Trail Guide' && html.includes('Its model can be changed later.'), 'one twin: the model picker names it')
+    H.override.batch = { data: { ...batchInfo, twins: [{ ...batchInfo.twins[0], left: ['instructions'], model: 'grok-4.7' }] } }
+    html = text(done([{ ...trail, setup_left: ['instructions'] }]))
+    ok(html.includes('It needs its instructions.') && !html.includes('and a model') && html.includes('It has a model already'), `one twin with the owner's model: only its instructions are named (${html.slice(0, 200)})`)
+    H.override = {}
+
+    // The instructions step: one request, three steps, Downloads watched, files can be dropped, a line per twin.
+    reset()
+    raw = batch({ initialPhase: 'instructions' })
+    html = text(raw)
+    for (const s of ['Instructions for 3 twins', 'Ask each bot in Grok once; Hermes brings in their answers.', 'Paste it into the chat of each ticked bot in Grok.', 'Save each answer file to your Downloads folder.', 'Watching your Downloads folder: each answer file is brought in as it lands.', 'Or drop the answer files here', EXPORT_PRIVACY, 'Trail Guide: waiting for its file…', 'Garden Notes: waiting for its file…', 'Book Club: waiting for its file…']) {
+      ok(html.includes(s), `batch instructions step shows "${s}"`)
+    }
+    ok(!NO_FINISH.test(html) && count(html, EXPORT_PRIVACY) === 1, 'batch instructions step: the privacy sentence once; no "started" or "Finish"')
+    ok(JSON.stringify(primaries()) === JSON.stringify(['Copy the request']) && has('Choose files…') && variantOf('Let Hermes do the Grok part') === 'text' && !has('Keep their skills the same with Skill sync…'), `batch instructions step: Copy the request is the one primary; the Grok part is a quiet way (${texts()})`)
+    ok(raw.includes('multiple=""') && raw.includes('aria-label="Drop the answer files here"'), 'batch: several files can be chosen or dropped at once')
+    const byHand = H.buttons.filter(b => b.text === 'Paste it yourself instead')
+    ok(byHand.length === 3 && byHand[0].label === "Paste Trail Guide's instructions yourself instead" && byHand.every(b => b.variant === 'text'), `batch: a quiet "Paste it yourself instead" per waiting twin, named (${JSON.stringify(byHand.map(b => b.label))})`)
+    await press('Copy the request')
+    ok(H.clips.at(-1) === EXPORT_REQUEST, 'Copy the request puts the request on the clipboard')
+    html = text(batch({ initialCopied: true, initialPhase: 'instructions' }))
+    ok(html.includes("Copied. Paste it into each bot's chat in Grok.") && variantOf('Copy the request') === 'secondary', 'after copying: said, and the button steps back')
+    // The page watches Downloads every 4 s while the sheet is open, for at most 15 minutes, from just before it began.
+    ok(/post\('\/batch\/downloads', \{ apply: true, pair_ids: chosenIds, since \}\)/.test(source) && /const BATCH_EVERY_MS = 4_000/.test(source) && /const BATCH_WATCH_MS = 15 \* 60 \* 1000/.test(source) && /Math\.floor\(Date\.now\(\) \/ 1000\) - 5/.test(source) && /timers\.setInterval\(\(\) => \{\n\s+if \(Date\.now\(\) - began >= BATCH_WATCH_MS\)/.test(source), 'batch: Downloads looked at every 4 s, 15 minutes at most, since the moment watching began (minus 5 s)')
+    ok(/post\('\/batch\/import', \{ files: sent, pair_ids: chosenIds \}\)/.test(source) && /for \(const f of picked\) \{[\s\S]{0,200}exportTextOf\(f\)/.test(source), 'batch: dropped or chosen files are read as text and sent together')
+    // With skill sync set up, a bot also saves its file in the box and it comes through the shared folder.
+    H.override.batch = { data: { ...batchInfo, pickup: { via: 'mirror', label: 'the shared folder' }, skill_sync: { set_up: true, pair_ids: [] } } }
+    html = text(batch({ initialPhase: 'instructions' }))
+    ok(html.includes('Each bot also saves its file in the shared box folder, and skill sync brings it here.') && html.includes("Watching the shared folder and Downloads. A file saved in the box arrives after the sync bot's next run") && !html.includes('Watching your Downloads folder'), `batch with skill sync: the shared folder is watched too (${html.slice(0, 160)})`)
+    H.override = {}
+    html = text(batch({ initialPhase: 'instructions', initialWatch: 'stopped' }))
+    ok(html.includes('Stopped watching after 15 minutes.') && variantOf('Watch again') === 'secondary', 'batch: after 15 minutes the watch stops, with Watch again')
+    // Progress per twin, in plain words.
+    raw = batch({ initialGot: P.mergeBatch({}, batchDownloads.results), initialPhase: 'instructions', initialUnmatched: 1 })
+    html = text(raw)
+    for (const s of ['Trail Guide: instructions in ✓', '2 routines added, switched off', '1 connector to set up here', '1 line left out: it looks like a password or key', 'Garden Notes: waiting for its file…', 'Book Club: its file could not be brought in. This file is not a setup export.', '1 file was not from a ticked bot.']) {
+      ok(html.includes(s), `batch progress shows "${s}"`)
+    }
+    ok(H.buttons.filter(b => b.text === 'Paste it yourself instead').length === 2, 'a twin whose file is in has no "Paste it yourself instead"')
+    // A twin that is done stays done; "no file yet" never overwrites a line.
+    const merged = P.mergeBatch(P.mergeBatch({}, batchDownloads.results), [{ pair_id: 'trail-guide', state: 'failed', why: 'x' }, { pair_id: 'book-club', state: 'no_file' }])
+    ok(merged['trail-guide'].state === 'done' && merged['book-club'].state === 'failed' && !('garden-notes' in merged), 'batch: done stays done, no_file changes nothing')
+    // Skill sync set up: the way to it, once.
+    H.override.batch = { data: { ...batchInfo, skill_sync: { set_up: true, pair_ids: ['recipe-planner'] } } }
+    batch({ initialPhase: 'instructions' })
+    ok(variantOf('Keep their skills the same with Skill sync…') === 'text', 'skill sync set up: offered as a quiet link')
+    H.override = {}
+    // Model results said once, failures in plain words.
+    html = text(batch({ initialModelSaid: { failed: [{ name: 'Book Club', why: 'Hermes could not write its settings file.' }], model: 'grok-4.7', set: ['Trail Guide', 'Garden Notes'] }, initialPhase: 'instructions' }))
+    ok(html.includes('Model grok-4.7 set for Trail Guide and Garden Notes.') && html.includes('Book Club: the model was not set. Hermes could not write its settings file.'), 'batch: the model result, and the twin it failed for')
+
+    // Every ticked twin has its instructions: said, and Done.
+    const allIn = Object.fromEntries(['trail-guide', 'garden-notes', 'book-club'].map(id => [id, { connectors: 0, file: 'f.json', instructions: true, leftOut: 0, routines: id === 'trail-guide' ? 2 : 0, state: 'done', why: '' }]))
+    raw = batch({ initialGot: allIn, initialModelSaid: { failed: [], model: 'grok-4.7', set: ['Trail Guide', 'Garden Notes', 'Book Club'] }, initialPhase: 'instructions' })
+    html = text(raw)
+    ok(html.includes('All 3 twins have their instructions.') && html.includes('They follow Grok from now on.') && JSON.stringify(texts()) === JSON.stringify(['Done']) && endsInButton(raw) && !NO_FINISH.test(html), `all done: said, with Done (${texts()}; ${html.slice(0, 200)})`)
+    ok(html.includes('Routines stay switched off until you choose Move routines to Hermes'), 'all done: where the routines that came along are switched on')
+
+    // Let Hermes do the Grok part: not available here -> exactly what to switch on.
+    reset()
+    raw = batch({ initialPhase: 'grok' })
+    html = text(raw)
+    ok(html.includes('Let Hermes do the Grok part') && html.includes('Hermes needs a few things switched on first.') && cuOff.enable.every(s => html.includes(s)) && has('Look again') && !has('Start in a new Hermes chat') && H.restCalls.length === 0, `Grok part not available: the sentences to switch on, nothing started (${html.slice(0, 260)})`)
+    // Available: the permission check comes first, and Start waits for the owner's tick.
+    H.override['computer-use'] = { data: cuOn }
+    H.newChats = []
+    raw = batch({ initialPhase: 'grok' })
+    html = text(raw)
+    for (const s of ['Before Hermes starts', "In a new Hermes chat, Hermes opens the chat of each ticked bot in the Grok app, pastes the request and saves the answer to your Downloads folder.", 'Every click asks you first: answer Once each time.', "Screenshots of the Grok window go to this chat's model provider.", 'You can stop it at any time with Stop, or by typing /stop.', 'I will approve each step myself']) {
+      ok(html.includes(s), `Grok part permission check shows "${s}"`)
+    }
+    const consent = H.checks.find(c => c.id === 'batch-consent')
+    ok(consent && consent.checked === false && consent.label === 'I will approve each step myself' && H.buttons.find(b => b.text === 'Start in a new Hermes chat')?.disabled === true && H.restCalls.length === 0 && H.newChats.length === 0, 'Grok part: Start waits until "I will approve each step myself" is ticked; nothing starts by itself')
+    reset()
+    H.newChats = []
+    H.clips = []
+    H.restReply = async path => (path === '/batch/grok-part' ? grokPartOk : {})
+    batch({ initialConsent: true, initialPhase: 'grok' })
+    ok(H.buttons.find(b => b.text === 'Start in a new Hermes chat')?.disabled === false && primaries().includes('Start in a new Hermes chat'), 'ticked: Start in a new Hermes chat can be pressed')
+    await press('Start in a new Hermes chat')
+    ok(H.restCalls[0]?.path === '/batch/grok-part' && JSON.stringify(H.restCalls[0]?.opts?.body) === JSON.stringify({ pair_ids: ['trail-guide', 'garden-notes', 'book-club'] }) && H.newChats.length === 1 && H.clips.at(-1) === grokPartOk.message, `Start: hands over the ticked twins, opens a new chat, the message on the clipboard (${JSON.stringify(H.restCalls[0])})`)
+    ok(H.notes.at(-1)?.message === 'Paste it into the new chat' && /answer Once each time/.test(H.notes.at(-1)?.meta), `Start: says to paste it into the new chat (${JSON.stringify(H.notes.at(-1))})`)
+    {
+      const kept = (H.storedSets ?? []).filter(([k]) => k === 'batch-open').at(-1)?.[1]
+      ok(kept && JSON.stringify(kept.ids) === JSON.stringify(['trail-guide', 'garden-notes', 'book-club']) && Number.isFinite(kept.since) && Math.abs(kept.at - Date.now()) < 5_000, `Start: the open batch is remembered on this computer (${JSON.stringify(kept)})`)
+    }
+    // The Twins page opens it again (the new chat took the page away): straight at the watching step, with the
+    // remembered time, a line about the other chat and a way to stop Hermes.
+    {
+      const keepMode = H.mode
+      const keepStatus = H.status
+      const SINCE = Math.floor(Date.now() / 1000) - 400
+      H.mode = 'ok'
+      H.status = { ...statusAll, sample: { on: false, hide_real: false, instructions_example: null }, pairs: [trail, notes, club] }
+      H.storedRemoves = []
+      H.stored['batch-open'] = { at: Date.now() - 5 * 60_000, ids: ['trail-guide', 'garden-notes'], since: SINCE }
+      ok(JSON.stringify(P.openBatchOf(ctx.storage)) === JSON.stringify({ at: Date.now() - 5 * 60_000, ids: ['trail-guide', 'garden-notes'], since: SINCE }), 'a batch handed over 5 minutes ago is read back whole')
+      html = text(page())
+      ok(html.includes('Instructions for 2 twins') && html.includes('Hermes is doing the Grok part in another chat. Files it saves to Downloads are picked up here.') && html.includes('Trail Guide: waiting for its file…') && !html.includes('Book Club: waiting') && variantOf('Stop Hermes') === 'text' && !(H.storedRemoves ?? []).includes('batch-open'), `Twins page: a fresh batch opens again at the watching step (${html.slice(0, 160)})`)
+      ok(/useState\(\(\) => \(resumed \? resumed\.since : /.test(source), 'the reopened sheet watches from the remembered time, so files saved meanwhile are brought in')
+      // Older than half an hour: not opened, and forgotten.
+      H.stored['batch-open'] = { at: Date.now() - 31 * 60_000, ids: ['trail-guide', 'garden-notes'], since: SINCE }
+      html = text(page())
+      ok(!html.includes('Instructions for') && !html.includes('Hermes is doing the Grok part') && (H.storedRemoves ?? []).includes('batch-open'), 'Twins page: a batch older than 30 minutes is not opened again, and is cleared')
+      H.storedRemoves = []
+      H.stored['batch-open'] = { at: Date.now(), ids: [7], since: 'x' }
+      ok(P.openBatchOf(ctx.storage) === null && (H.storedRemoves ?? []).includes('batch-open'), 'a record that is not a batch is cleared')
+      delete H.stored['batch-open']
+      ok(P.openBatchOf(ctx.storage) === null, 'nothing remembered: nothing opens')
+      // Stop Hermes: the backend is told to stop, and the batch is forgotten.
+      reset()
+      H.storedRemoves = []
+      H.restReply = async path => (path === '/batch/grok-part' ? { ok: true } : {})
+      batch({ pairs: [trail, notes], resumed: { at: Date.now(), ids: ['trail-guide', 'garden-notes'], since: SINCE } })
+      await press('Stop Hermes')
+      ok(H.restCalls[0]?.path === '/batch/grok-part' && JSON.stringify(H.restCalls[0]?.opts?.body) === JSON.stringify({ stop: true }) && (H.storedRemoves ?? []).includes('batch-open') && H.notes.at(-1)?.message === 'Hermes stopped the Grok part', `Stop Hermes posts stop and forgets the batch (${JSON.stringify(H.restCalls[0])})`)
+      // Later forgets it too.
+      H.storedRemoves = []
+      batch({ pairs: [trail, notes], resumed: { at: Date.now(), ids: ['trail-guide', 'garden-notes'], since: SINCE } })
+      await press('Later')
+      ok((H.storedRemoves ?? []).includes('batch-open'), 'Later: the remembered batch is cleared')
+      H.restReply = async () => ({})
+      H.mode = keepMode
+      H.status = keepStatus
+    }
+    // The hand-over refused (switched off meanwhile): no chat is opened.
+    reset()
+    H.newChats = []
+    H.restReply = async path => (path === '/batch/grok-part' ? grokPartOff : {})
+    batch({ initialConsent: true, initialPhase: 'grok' })
+    await press('Start in a new Hermes chat')
+    ok(H.newChats.length === 0, 'Grok part refused: no chat is opened')
+    H.override = {}
+    H.restReply = async () => ({})
+
+    // Today's backend does not say what is left: the page claims only what is true (the old screen, "made").
     raw = done([{ ...legacy, pair_id: 'trail-guide', grok: trail.grok, hermes: trail.hermes }])
     html = text(raw)
-    ok(!html.includes("twin is started.") && html.includes("Trail Guide's twin is started") && html.includes("It has the bot's name and description, and follows them.") && !/keeps up with Grok by itself|now has a twin|ready/.test(html) && !has('Finish setting up'), `after twinning (older backend): only what is true (${html.slice(0, 200)})`)
+    ok(html.includes("Trail Guide's twin is made") && html.includes("It has the bot's name and description, and follows them.") && !/keeps up with Grok by itself|now has a twin|ready|started/.test(html) && !/Finish/.test(texts().join()), `after twinning (older backend): only what is true (${html.slice(0, 200)})`)
     ok(JSON.stringify(primaries()) === JSON.stringify(['Done']) && variantOf('Open in Hermes') === 'secondary', 'after twinning (older backend): Done, with Open in Hermes beside it')
     await press('Open in Hermes')
     ok(H.newChats.at(-1) === 'trail-guide', 'Open in Hermes starts a chat with that twin')
     // Nothing left (a twin whose bot has no instructions and whose copy already has a model).
     html = text(done([{ ...trail, setup_left: [] }]))
     ok(html.includes("Trail Guide's twin is ready") && !html.includes('twin is ready.') && html.includes('It follows Grok from now on.') && JSON.stringify(primaries()) === JSON.stringify(['Open in Hermes']) && variantOf('Done') === 'ghost', 'after twinning with nothing left: ready, Open in Hermes')
-    {
-      const asked3 = []
-      html = text(done([trail, notes, club], { onFinish: id => asked3.push(id) }))
-      ok(html.includes('3 twins are started') && !html.includes('twins are started.') && html.includes('Each has its name and description. Finish them one at a time; the Twins page keeps count.') && count(html, '2 things left') === 3, `several new twins: each says what is left (${html.slice(0, 240)})`)
-      ok(JSON.stringify(texts()) === JSON.stringify(['Later', 'Finish setting up Trail Guide']) && JSON.stringify(primaries()) === JSON.stringify(['Finish setting up Trail Guide']) && variantOf('Later') === 'ghost' && !has('Done'), `several new twins: the next step is the button, not a bare Done (${texts()})`)
-      await press('Finish setting up Trail Guide')
-      ok(JSON.stringify(asked3) === JSON.stringify(['trail-guide']), 'several new twins: the button opens the first one')
-      // Several twins with nothing left: nothing to finish, so Done.
-      html = text(done([{ ...trail, setup_left: [] }, { ...notes, setup_left: [] }]))
-      ok(html.includes('2 twins are started') && html.includes('Each has its name and description.') && JSON.stringify(texts()) === JSON.stringify(['Done']), 'several new twins, nothing left: Done')
-    }
+    html = text(done([{ ...trail, setup_left: [] }, { ...notes, setup_left: [] }]))
+    ok(html.includes('2 twins are ready') && html.includes('They follow Grok from now on.') && JSON.stringify(texts()) === JSON.stringify(['Done']) && !/started/.test(html), 'several new twins, nothing left: ready, Done')
     html = text(done([]))
     ok(html.includes('No twin was made') && html.includes('Nothing was changed.') && JSON.stringify(texts()) === JSON.stringify(['Done']), 'no twin made: said plainly')
   }

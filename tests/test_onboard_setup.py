@@ -388,8 +388,11 @@ def test_the_skill_is_one_hermes_can_load_and_the_plugin_registers_it(home):
             raise AttributeError(name)
     ctx = Ctx()
     plugin.register(ctx)
+    grok_part = ROOT / "skills" / plugin.GROK_PART_SKILL / "SKILL.md"
     assert ctx.skills == [("set-up-grok-bot-twin", SKILL, plugin.SKILL_DESCRIPTION,
-                           {"name": "set-up-grok-bot-twin", "description": plugin.SKILL_DESCRIPTION})]
+                           {"name": "set-up-grok-bot-twin", "description": plugin.SKILL_DESCRIPTION}),
+                          ("finish-twins-in-grok", grok_part, plugin.GROK_PART_DESCRIPTION,
+                           {"name": "finish-twins-in-grok", "description": plugin.GROK_PART_DESCRIPTION})]
     assert list(home.rglob("*")) == []  # registering it wrote nothing
 
     class Refuses(Ctx):
@@ -418,5 +421,5 @@ def test_the_designs_say_that_they_are_designs_and_what_is_unverified():
     assert "Neither has been run on the real Grok app" in readme
     manifest = " ".join((ROOT / "plugin.yaml").read_text(encoding="utf-8").split())
     disclosure = " ".join((ROOT / "docs" / "DISCLOSURE.md").read_text(encoding="utf-8").split())
-    assert "One skill ships with the plugin: set-up-grok-bot-twin" in manifest
+    assert "Two skills ship with the plugin: set-up-grok-bot-twin" in manifest and "finish-twins-in-grok" in manifest
     assert "grok-bot-twin:set-up-grok-bot-twin" in disclosure and "after you said yes" in disclosure

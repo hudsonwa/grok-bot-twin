@@ -42,6 +42,7 @@ exactly as it is. Everything here is also on the Twins page in Hermes Desktop.
 Everyday
   status                 your twins and what to do next (--json for scripts)
   add                    give a Grok bot a twin: add --bot "Acme Support" (or --all); asks first
+  finish [TWIN ...]      new twins: set their model and print what to ask each bot for (--all)
   stop [TWIN]            stop twinning a bot; its Hermes bot and chats stay
 
 Your other computers
@@ -74,6 +75,7 @@ Advanced
   copies                 what copies over and how: the whole table, as on the Twins page
   checklist [TWIN]       what you do yourself, and what moving routines to Hermes takes
   import [TWIN] FILE     import the setup export a Grok bot wrote about itself (--request prints what to ask it)
+  import-exports DIR     import every setup export in a folder, each into its bot's twin (--show)
   switch [TWIN]          move routines to Hermes: turn the copied routines on (--undo pauses them again)
   approve [TWIN] ITEM    let one waiting change go ahead
   skip [TWIN] ITEM       keep a changed skill in Hermes only (--undo offers it again)
@@ -938,6 +940,328 @@ def cmd_import(a) -> int:
     return 1 if failed else 0
 
 
+# ---- several twins at once: finish (model + the request to paste) and import-exports (a folder of answers) -------
+EXPORTS_DIR_HINT = "~/Downloads"
+EXPORT_SUFFIXES = (".json", ".txt", ".md")
+EXPORT_FILES_MAX = 40
+
+
+def _batch_name(t: dict) -> str:
+    return safe.clean_name(t.get("name"), 100) or str(t.get("pair_id") or "?")
+
+
+def _batch_pids(svc, given: list) -> list:
+    """The twins named on the command line, each once, in the order given."""
+    out: list = []
+    for g in given:
+        pid = _resolve(svc, g)
+        if pid not in out:
+            out.append(pid)
+    return out
+
+
+def cmd_finish(a) -> int:
+    """Set the model on several twins at once and print, once, what to paste into each bot's chat in Grok."""
+    named = list(getattr(a, "twins", None) or [])
+    if named and a.all:
+        raise EngineError("usage", "Name the twins or use --all, not both.")
+    if not named and not a.all:
+        raise EngineError("usage", "Say which twins: hermes twin finish \"Acme Support\" \"Recipe Planner\" "
+                                   "(or --all for every twin with something left).")
+    from . import tasks
+    if tasks.asked_turn():  # (the chat turn of a request from another computer never changes a twin's setup)
+        raise EngineError("refused", "A request from another computer cannot set twins' models.",
+                          "Do it yourself, on the Twins page or in your own terminal.")
+    svc = _svc()
+    pids = _batch_pids(svc, named) if named else None
+    info = svc.batch_info(pids)
+    twins = [t for t in info.get("twins") or [] if isinstance(t, dict) and t.get("pair_id")]
+    for t in twins:
+        if t.get("sample"):
+            if named:
+                _out(f" {_batch_name(t)}: the sample, with invented data; nothing to do.")
+    twins = [t for t in twins if not t.get("sample")]
+    explicit = (a.model or "").strip()
+    if a.all:
+        if not twins:
+            raise _NoTwin(NO_TWINS)
+        twins = [t for t in twins if t.get("left") or explicit]
+        if not twins:
+            _out("Nothing is left: every twin has its instructions and a model.")
+            return 0
+    if not twins:
+        _out("Nothing to do.")
+        return 0
+    model = explicit or str(info.get("default_model") or "").strip()
+    to_set = [t for t in twins if explicit or "model" in (t.get("left") or [])]
+    if to_set and not model:
+        names = " ".join(_call({t["pair_id"]: _batch_name(t) for t in twins}, t["pair_id"]) for t in twins[:20])
+        _err("This Hermes has no model chosen yet, so say which one the twins should use:")
+        _err(f"  hermes twin finish {'--all' if a.all else names} --model MODEL")
+        for e in (info.get("endpoints") or [])[:6]:
+            nm = safe.clean_name(e.get("name"), 60)
+            ids = [safe.clean_name(m, 100) for m in (e.get("models") or [])[:20] if isinstance(m, str)]
+            if nm and ids:
+                where = " (local)" if e.get("local") else ""
+                note = "" if e.get("reachable") else " (not answering now)"
+                _err(f"  {nm}{where}{note}: --endpoint \"{nm}\" --model {' | '.join(m for m in ids if m)}")
+        _err("  Grok Bot Twin never downloads a model; add a model server you already run with `hermes model`.")
+        known = [safe.clean_name(m, 100) for m in (info.get("models") or [])[:20] if isinstance(m, str)]
+        if known:
+            _err(f"  Models this Hermes already uses: {', '.join(m for m in known if m)}")
+        _err("Nothing changed.")
+        return 2
+    shown_model = safe.clean_name(model, 100)
+    _out(f"For {plural(len(twins), 'twin')}:")
+    for t in twins:
+        left = t.get("left") or []
+        bits = []
+        if t in to_set:
+            bits.append(f"model: set to {shown_model}")
+        else:
+            now = safe.clean_name(t.get("model"), 100)
+            bits.append(f"model: stays {now}" if now else "model: chosen")
+        bits.append("instructions: still to come from Grok" if "instructions" in left else "instructions: in")
+        _out(f" {_batch_name(t)}: " + "; ".join(bits))
+    rc = 0
+    if to_set:
+        if not a.yes and not _confirm(f"Set the model to {shown_model} on {plural(len(to_set), 'twin')}? "
+                                      "You can change it later, twin by twin."):
+            _out("Nothing changed.")
+            return 1
+        ep = getattr(a, "endpoint", None)
+        res = svc.batch_models([t["pair_id"] for t in to_set], model, *([ep] if ep else []))
+        names = {t["pair_id"]: _batch_name(t) for t in twins}
+        for r in res.get("results") or []:
+            name = names.get(r.get("pair_id"), safe.clean_name(r.get("name"), 100) or "?")
+            state = r.get("state")
+            if state == "set":
+                _out(f" {name}: model set to {shown_model} ✓")
+            elif state == "same":
+                _out(f" {name}: already uses {shown_model} ✓")
+            elif state == "sample":
+                _out(f" {name}: the sample; not changed.")
+            else:
+                rc = 1
+                _out(f" × {name}: the model could not be set"
+                     + (f": {safe.clean_summary(r.get('why'), 200)}" if r.get("why") else "."))
+    waiting = [t for t in twins if "instructions" in (t.get("left") or [])]
+    if not waiting:
+        _out("Every one of these twins has its instructions.")
+        return rc
+    request = str(info.get("request") or "")
+    if not request:
+        from . import setup_export
+        request = setup_export.REQUEST
+    _out("")
+    _out(f"Now the instructions. Paste this into the chat of each of these bots in Grok: "
+         f"{_quoted([_batch_name(t) for t in waiting])}")
+    _out("--- paste from the next line ---")
+    _out(request.rstrip("\n"))
+    _out("--- up to the line above ---")
+    _out(f"Each bot answers with a file. Save each answer file, then run: hermes twin import-exports "
+         f"{EXPORTS_DIR_HINT}")
+    if info.get("privacy"):
+        _out(safe.clean_summary(info["privacy"], 300))
+    return rc
+
+
+def _read_text_capped(path: str, cap: int) -> tuple[Optional[str], str]:
+    """(text, "") for a regular file read once as UTF-8, or (None, why). Never follows a link, never opens a pipe."""
+    import stat as _stat
+    try:
+        fd = _osflags.open_nofollow(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    except (OSError, ValueError):
+        return None, "could not be read"
+    try:
+        st = os.fstat(fd)
+        if not _stat.S_ISREG(st.st_mode):
+            return None, "not a file"
+        if st.st_size > cap:
+            return None, "too large to be a setup export"
+        chunks, total = [], 0
+        while total <= cap:
+            chunk = os.read(fd, min(1 << 20, cap + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        if total > cap:
+            return None, "too large to be a setup export"
+        return b"".join(chunks).decode("utf-8-sig"), ""
+    except UnicodeDecodeError:
+        return None, "not text"
+    except OSError:
+        return None, "could not be read"
+    finally:
+        os.close(fd)
+
+
+def _export_files(folder: str) -> tuple[list, list]:
+    """([{"name","text"}], [(name, why)]): the regular files in FOLDER ending .json/.txt/.md (no links, no hidden
+    files), newest first, at most EXPORT_FILES_MAX, each at most setup_export.TEXT_CAP bytes."""
+    from . import setup_export
+    path = os.path.expanduser(folder)
+    try:
+        entries = list(os.scandir(path))
+    except (OSError, ValueError, TypeError):
+        raise EngineError("usage", "That folder could not be read.",
+                          f"Give the folder the answer files are in: hermes twin import-exports {EXPORTS_DIR_HINT}")
+    import stat as _stat
+    found, names = [], set()
+    for e in entries:
+        # (the name as it is shown and matched: one line, capped; two files that would show alike are one too many)
+        name = safe.clean_name(e.name, 120)
+        if not name or name in names or e.name.startswith(".") or not e.name.lower().endswith(EXPORT_SUFFIXES):
+            continue
+        try:
+            st = e.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if not _stat.S_ISREG(st.st_mode) or _osflags.is_link(st):
+            continue
+        names.add(name)
+        found.append((st.st_mtime, name, e.path))
+    found.sort(key=lambda x: (-x[0], x[1]))
+    files, skipped = [], []
+    for _mtime, name, full in found[:EXPORT_FILES_MAX]:
+        text, why = _read_text_capped(full, setup_export.TEXT_CAP)
+        if text is None:
+            skipped.append((name, why))
+        else:
+            files.append({"name": name, "text": text})
+    if len(found) > EXPORT_FILES_MAX:
+        skipped.append((f"{len(found) - EXPORT_FILES_MAX} older files", "not looked at (40 at most, newest first)"))
+    return files, skipped
+
+
+def _file_name(name: Any) -> str:
+    return safe.clean_name(name, 120) or "?"
+
+
+def _plan_counts(prev: dict) -> str:
+    """"instructions (12 lines), 2 routines (arrive switched off), 1 connector to set up here" for one preview."""
+    bits = []
+    ins = prev.get("instructions") or {}
+    if ins.get("state") == "new":
+        bits.append(f"instructions ({plural(int(ins.get('lines') or 0), 'line')}"
+                    + (", replaces the ones it has now" if ins.get("replaces") else "") + ")")
+    elif ins.get("state") == "same":
+        bits.append("instructions already in")
+    elif ins.get("state") == "held":
+        bits.append("instructions not copied (too much looks like a password or key)")
+    new = sum(1 for r in prev.get("routines") or [] if r.get("state") == "new")
+    if new:
+        bits.append(f"{plural(new, 'routine')} ({'arrives' if new == 1 else 'arrive'} switched off)")
+    if prev.get("connectors"):
+        bits.append(f"{plural(len(prev['connectors']), 'connector')} to set up here")
+    return ", ".join(bits) or "nothing new"
+
+
+def _has_new(prev: dict) -> bool:
+    return ((prev.get("instructions") or {}).get("state") == "new" or bool(prev.get("connectors"))
+            or any(r.get("state") == "new" for r in prev.get("routines") or []))
+
+
+def _result_line(r: dict) -> str:
+    """"Acme Helper: instructions in ✓, 2 routines added (switched off), 1 connector to set up here"."""
+    name = safe.clean_name(r.get("name"), 100) or str(r.get("pair_id") or "?")
+    state = r.get("state")
+    if state == "failed":
+        return f" × {name}: not imported" + (f": {safe.clean_summary(r.get('why'), 200)}" if r.get("why") else ".")
+    if state == "no_file":
+        return f" {name}: no file for it yet"
+    if state == "sample":
+        return f" {name}: the sample; not changed"
+    bits = ["instructions in ✓" if r.get("instructions") else "instructions unchanged"]
+    n = int(r.get("routines") or 0)
+    if n:
+        bits.append(f"{plural(n, 'routine')} added (switched off)")
+    c = int(r.get("connectors") or 0)
+    if c:
+        bits.append(f"{plural(c, 'connector')} to set up here")
+    lo = int(r.get("lines_left_out") or 0)
+    if lo:
+        bits.append(f"{plural(lo, 'line')} left out (looked like a password or key)")
+    return f" {name}: " + ", ".join(bits)
+
+
+MATCH_WORDS = {"not_export": "not a setup export", "ambiguous": "more than one twin could take it"}
+
+
+def cmd_import_exports(a) -> int:
+    """Every setup export in a folder, each into the twin of its bot: plan, one question, import."""
+    from . import tasks
+    if tasks.asked_turn():  # (the chat turn of a request from another computer never changes a twin's setup)
+        raise EngineError("refused", "A request from another computer cannot import a setup export.",
+                          "Import it yourself, on the Twins page or in your own terminal.")
+    svc = _svc()
+    pids = _batch_pids(svc, list(a.twin or [])) if a.twin else None
+    if pids is None and not [p for p in svc.pair_ids() if p not in svc.demo.pair_ids()]:
+        raise _NoTwin(NO_TWINS)
+    files, skipped = _export_files(a.folder)
+    for name, why in skipped:
+        _out(f" {_file_name(name)}: {why}")
+    if not files:
+        _out("No setup export files there (it looks at .json, .txt and .md files).")
+        return 1
+    texts = {f["name"]: f["text"] for f in files}
+    matches = [m for m in svc.batch_match(files, pids).get("matches") or [] if isinstance(m, dict)]
+    _out(f"Setup exports found: {plural(len(files), 'file')}")
+    plans = []  # (match, preview)
+    for m in matches:
+        fname = _file_name(m.get("file"))
+        state = m.get("state")
+        if state == "matched" and m.get("pair_id") and m.get("file") in texts:
+            twin = safe.clean_name(m.get("name"), 100) or m["pair_id"]
+            try:
+                prev = svc.import_setup(m["pair_id"], texts[m["file"]], False, m.get("bot") or None)
+            except EngineError as exc:
+                _out(f" {fname} -> {twin}: {exc.message}")
+                continue
+            plans.append((m, prev))
+            _out(f" {fname} -> {twin}: {_plan_counts(prev)}")
+        elif state == "no_twin":
+            bot = safe.clean_name(m.get("bot"), 100)
+            _out(f" {fname}: no twin for the bot \"{bot}\"" if bot else f" {fname}: no twin for its bot")
+        elif state == "ambiguous":
+            why = safe.clean_summary(m.get("why"), 200) or MATCH_WORDS["ambiguous"]
+            bot = safe.clean_name(m.get("bot"), 100)
+            _out(f" {fname}" + (f" (\"{bot}\")" if bot else "") + f": {why}")
+        else:
+            why = MATCH_WORDS.get(state) or safe.clean_summary(m.get("why"), 200) or "not used"
+            _out(f" {fname}: {why}")
+    todo = [(m, p) for m, p in plans if _has_new(p)]
+    if not todo:
+        _out("Nothing to import.")
+        return 0 if plans else 1
+    if getattr(a, "show", False):
+        for m, prev in todo:
+            _out(f"\n=== {safe.clean_name(m.get('name'), 100) or m['pair_id']}, from {_file_name(m.get('file'))} ===")
+            _show_export_text(prev)
+    elif any((p.get("instructions") or {}).get("state") == "new" or any(r.get("state") == "new"
+             for r in p.get("routines") or []) for _m, p in todo):
+        # the bots wrote this text: the owner reads it before it becomes a twin's instructions or a routine
+        _out(" Read the text before you import it: add --show")
+    if todo[0][1].get("privacy"):
+        _out(" " + safe.clean_summary(todo[0][1]["privacy"], 300))
+    if not a.yes and not _confirm(f"Import into {plural(len({m['pair_id'] for m, _p in todo}), 'twin')}?"):
+        _out("Nothing changed.")
+        return 1
+    chosen = [m["pair_id"] for m, _p in todo]
+    send = [f for f in files if f["name"] in {m.get("file") for m, _p in todo}]
+    res = svc.batch_import(send, list(dict.fromkeys(chosen)))
+    results = [r for r in res.get("results") or [] if isinstance(r, dict) and r.get("pair_id") in chosen]
+    for r in results:
+        _out(_result_line(r))
+    _out("Nothing was sent to Grok.")
+    if any(int(r.get("routines") or 0) for r in results):
+        _out("Turn the routines on when the Grok ones are off: hermes twin switch")
+    if any(int(r.get("connectors") or 0) for r in results):
+        _out("Hermes copies no logins. Connect each connector in Hermes yourself.")
+    return 1 if any(r.get("state") == "failed" for r in results) else 0
+
+
 def cmd_send(a) -> int:
     svc = _svc()
     pid = _one(svc, a.pair)
@@ -1335,6 +1659,7 @@ HANDLERS: dict[str, Callable[[Any], int]] = {
     "switch": cmd_switch, "send-to-grok": cmd_send, "doctor": cmd_doctor, "demo": cmd_demo,
     "approve": cmd_approve, "skill-sync": cmd_mirror, "remove": cmd_remove, "stop": cmd_remove, "digest": cmd_digest,
     "setup": cmd_setup, "verify": cmd_attest, "uninstall": cmd_uninstall, "skip": cmd_skip, "import": cmd_import,
+    "finish": cmd_finish, "import-exports": cmd_import_exports,
     "background": lambda a: bgagent.handle_cli(a, _out),
     # plain-word aliases
     "check": cmd_sync, "move": cmd_switch,
@@ -1426,6 +1751,23 @@ def setup(parser: argparse.ArgumentParser) -> None:
     p.add_argument("args", nargs="*", metavar="[TWIN] FILE")
     p.add_argument("--request", action="store_true", help="Print the request to paste into the bot's own Grok chat")
     p.add_argument("--bot", metavar="NAME", help="The bot in the file to take, when it holds several")
+    p.add_argument("--show", action="store_true",
+                   help="Print the instructions and the routines' prompts, whole, before the question")
+    p.add_argument("--yes", "-y", action="store_true", help="Do not ask")
+    p = subs.add_parser("finish", help="Several new twins at once: set the model and print what to ask each bot "
+                                       "in Grok for its instructions")
+    p.add_argument("twins", nargs="*", type=_twin, metavar="TWIN", help="The twins' names, in quotes")
+    p.add_argument("--all", action="store_true", help="Every twin that still needs its instructions or a model")
+    p.add_argument("--model", metavar="MODEL",
+                   help="The model for these twins (default: the one this Hermes uses); changeable later, twin by twin")
+    p.add_argument("--endpoint", metavar="NAME",
+                   help="A model server already set up in this Hermes (see the list `finish` prints) that serves MODEL")
+    p.add_argument("--yes", "-y", action="store_true", help="Do not ask")
+    p = subs.add_parser("import-exports",
+                        help="Import every setup export in a folder, each into the twin of its bot: import-exports DIR")
+    p.add_argument("folder", metavar="DIR", help="The folder the bots' answer files are in, such as ~/Downloads")
+    p.add_argument("--twin", action="append", type=_twin, metavar="NAME",
+                   help="Only this twin (repeatable; default: every twin)")
     p.add_argument("--show", action="store_true",
                    help="Print the instructions and the routines' prompts, whole, before the question")
     p.add_argument("--yes", "-y", action="store_true", help="Do not ask")
