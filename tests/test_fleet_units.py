@@ -302,7 +302,7 @@ def _list(twins, removed=(), rev="3-0a0b0c0d", fleet_=None):
 def test_a_list_from_another_machine_is_checked_cleaned_and_capped(home):  # noqa: F811
     key = "sk-" + "A1b2C3d4" * 5
     hostile = _list([
-        {"id": T1, "name": "Test\x00 Scout‮\n" + "x" * 500, "description": "ok\x07\npassword: " + key + "\n" + "d" * 5000,
+        {"id": T1, "name": "Test\x00 Scout\u202e\n" + "x" * 500, "description": "ok\x07\npassword: " + key + "\n" + "d" * 5000,
          "version": 2, "updated_at": "2000-01-01T09:00:00Z", "profile": "../../outside", "instructions": "do evil",
          "extra": {"a": 1}},
         {"id": "../../etc/passwd", "name": "bad id", "description": "", "version": 1},
@@ -318,7 +318,7 @@ def test_a_list_from_another_machine_is_checked_cleaned_and_capped(home):  # noq
     assert [t["id"] for t in lst["twins"]] == [T1, T2]
     first, second = lst["twins"]
     assert set(first) == {"id", "name", "description", "version", "updated_at"}  # nothing else is kept
-    assert "\x00" not in first["name"] and "‮" not in first["name"] and "\n" not in first["name"]
+    assert "\x00" not in first["name"] and "\u202e" not in first["name"] and "\n" not in first["name"]
     assert len(first["name"]) <= 100 and len(first["description"]) <= 2000
     assert key not in first["description"] and "\x07" not in first["description"]
     assert second == {"id": T2, "name": "Twin", "description": "", "version": 1, "updated_at": None}

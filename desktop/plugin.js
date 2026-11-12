@@ -2892,7 +2892,7 @@ function toGrokProblem(err) {
 }
 
 // Whole text, as sent: only control characters out (lines and tabs stay), never shortened for the eye.
-const wholeText = v => (typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ').slice(0, 200_000) : '')
+const wholeText = v => (typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').slice(0, 200_000) : '')
 
 function toGrokRoutineOf(r) {
   if (!r || typeof r !== 'object') {

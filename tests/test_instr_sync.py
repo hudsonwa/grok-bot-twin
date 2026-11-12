@@ -642,4 +642,4 @@ def test_the_sync_bot_step_names_only_the_chosen_bots_plainly():
     assert step.count("Acme Support") == 1 and "x" * 101 not in step
     assert "/workspace/skill-sync/exports/grok-bot-export-<its bot id>.json" in step
     assert "change nothing about itself" in step and "Leave \"memories\" and \"user_facts\" as empty lists" in step
-    assert I.mirror_step([]) == "" and I.mirror_step(["‮", " "]) == ""
+    assert I.mirror_step([]) == "" and I.mirror_step(["\u202e", " "]) == ""

@@ -181,8 +181,8 @@ def test_bad_requests_are_refused(world):
         world.batch_match([{"name": "a", "text": "x"}], ["no-such-twin"])
     assert ei.value.code == "pair_not_found"
     # an untrusted file name is made one plain line and capped
-    got = world.batch_match([{"name": "a‮\nb" + "x" * 500, "text": "x"}], None)["matches"][0]
-    assert "\n" not in got["file"] and "‮" not in got["file"] and len(got["file"]) <= batch.FILE_NAME_CAP
+    got = world.batch_match([{"name": "a\u202e\nb" + "x" * 500, "text": "x"}], None)["matches"][0]
+    assert "\n" not in got["file"] and "\u202e" not in got["file"] and len(got["file"]) <= batch.FILE_NAME_CAP
 
 
 # =====================================================================================================================

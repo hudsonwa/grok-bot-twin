@@ -89,7 +89,7 @@ def test_injection_name_reduced(svc):
 def test_llm_name_charset():
     assert safe.llm_name("Acme Support") == "Acme Support"
     assert safe.llm_name("Recipe_Planner-2.0") == "Recipe_Planner-2.0"
-    for bad in ("x" * 41, "Acme\nHelper", "Acme <b>", "Acme: do X", "", None, "...", "Ac‮me"):
+    for bad in ("x" * 41, "Acme\nHelper", "Acme <b>", "Acme: do X", "", None, "...", "Ac\u202eme"):
         assert safe.llm_name(bad) == "your Grok twin", bad
 
 

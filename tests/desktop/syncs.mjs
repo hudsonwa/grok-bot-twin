@@ -395,7 +395,7 @@ ok(H.restCalls.length === 0 && H.setData.length === 0 && !said, 'a way that cann
 
 {
   const rude = '<script>alert(1)</script>'
-  const bidi = 'Acme‮Support⁦x'
+  const bidi = 'Acme\u202eSupport\u2066x'
   const long = 'y'.repeat(5000)
   const hostile = panel([
     {
@@ -421,7 +421,7 @@ ok(H.restCalls.length === 0 && H.setData.length === 0 && !said, 'a way that cann
   html = render(hostile)
   const tidy = P.syncPanelOf(hostile)
   ok(!/<script|<b>|<i>/.test(markup), 'no text from the backend becomes markup')
-  ok(!/[‪-‮⁦-⁩]/.test(markup), 'bidi controls are taken out')
+  ok(!/[\u202a-\u202e\u2066-\u2069]/.test(markup), 'bidi controls are taken out')
   ok(tidy.twins.length === 1 && tidy.twins[0].name.length <= 60 && tidy.twins[0].items.every(i => i.note.length <= 300 && i.sentence.length <= 300) && tidy.mirror.state === 'unknown', 'a long name or note is capped; a twin id that cannot go back as it came is left out; an odd Mirror state is unknown')
   ok(JSON.stringify(tidy.twins[0].items.map(i => i.key)) === JSON.stringify(KEYS) && !html.includes('Secrets'), 'an unknown thing is left out; the first of each known one is kept, in the fixed order')
   ok(tidy.twins[0].items[1].direction === null && optionsOf('description').every(o => !o.checked) && optionsOf('description').every(o => o.disabled) && tidy.twins[0].items[1].choices.every(c => c.state === 'not_yet' && c.why === 'Not in this version yet.'), 'an unknown way: nothing checked; a way not offered as it should be cannot be chosen, and says so')

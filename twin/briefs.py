@@ -447,7 +447,7 @@ def parse(text: Any, twin: str, side: str = "grok") -> Brief:
         text = text.decode("utf-8", "replace")
     if not isinstance(text, str) or len(text.encode("utf-8", "replace")) > RAW_CAP:
         raise BriefError("bad_brief", "That brief is too long or not text.")
-    text = unicodedata.normalize("NFC", text.lstrip("﻿")).replace("\r\n", "\n")
+    text = unicodedata.normalize("NFC", text.lstrip("\ufeff")).replace("\r\n", "\n")
     lines = text.split("\n")
     if not lines or lines[0].strip() != HEADER:
         raise BriefError("bad_brief", "That is not a session brief (its first line is not the brief header).")

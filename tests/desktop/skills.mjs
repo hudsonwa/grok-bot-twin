@@ -371,7 +371,7 @@ ok(html.includes('No skills have arrived yet.'), 'on, nothing arrived yet: one s
     ...followerOn,
     message: '<img src=x onerror=1>',
     twins: [
-      { id: SCOUT, name: '<script>alert(1)</script>', skills: [skill({ label: '<b>bold</b>', name: 'a\u0000b‮c' }), skill({ key: '../../outside' }), skill({ key: 'ok-name', state: 'made-up', versions: [{ at: 'x', label: 'old', vid: '../x' }, { at: iso(1), label: 'fine', vid: 'v7' }], choices: [{ keep: 'both', label: 'Keep both' }, { keep: 'mine', label: '' }] }), null, 'x'] },
+      { id: SCOUT, name: '<script>alert(1)</script>', skills: [skill({ label: '<b>bold</b>', name: 'a\u0000b\u202ec' }), skill({ key: '../../outside' }), skill({ key: 'ok-name', state: 'made-up', versions: [{ at: 'x', label: 'old', vid: '../x' }, { at: iso(1), label: 'fine', vid: 'v7' }], choices: [{ keep: 'both', label: 'Keep both' }, { keep: 'mine', label: '' }] }), null, 'x'] },
       { id: 'not-an-id', name: 'Nobody', skills: [skill()] },
       null
     ]
@@ -383,7 +383,7 @@ ok(html.includes('No skills have arrived yet.'), 'on, nothing arrived yet: one s
 
     return renderToStaticMarkup(jsx(P.FleetSkills, { initialVersions: 'ok-name' }))
   })()
-  ok(!raw.includes('<script>') && !raw.includes('<img') && !raw.includes('<b>') && text(raw).includes('<script>alert(1)</script>') && !raw.includes('‮') && !raw.includes('Nobody') && !raw.includes('outside'), 'untrusted text is shown as text; a twin or skill with a malformed id is not shown')
+  ok(!raw.includes('<script>') && !raw.includes('<img') && !raw.includes('<b>') && text(raw).includes('<script>alert(1)</script>') && !raw.includes('\u202e') && !raw.includes('Nobody') && !raw.includes('outside'), 'untrusted text is shown as text; a twin or skill with a malformed id is not shown')
   ok(H.switches.length === 3 && H.buttons.filter(b => b.text === 'Put back').length === 1 && !H.buttons.some(b => /Keep/.test(b.text)), 'a malformed version or choice is not offered')
   const v = P.skillsOf(hostile)
   ok(v.twins.length === 1 && v.twins[0].skills.length === 2 && v.twins[0].skills[1].state === 'error' && v.twins[0].skills[1].versions.length === 1, 'the tidied view keeps only what has the right form')

@@ -852,11 +852,19 @@ To update later: `hermes plugins update grok-bot-twin`. Your twins, links and se
 install pinned with `--ref` is moved with the line Hermes prints then: the same install line with `--force` and
 the new `--ref`.)
 
-(Before the catalog entry is merged, install from GitHub instead:
-`hermes plugins install hudsonwa/twin --ref <sha> --enable`, using the 40-character `sha` pinned in
-the catalog entry `plugin-catalog/grok-bot-twin.yaml`. The catalog name works, at that same pin, once it is
-listed. Without `--enable` Hermes asks whether to switch the plugin on; over a remote shell it cannot ask and
-leaves it off, and `hermes plugins enable grok-bot-twin` switches it on.)
+Grok Bot Twin needs Hermes 0.22.7 or newer (`hermes --version`; `hermes update` brings it up to date).
+
+The catalog name installs the version the Hermes catalog lists, which can be older than this one. To install the
+newest version, from the `next` branch, use its 40-character commit (`--ref` takes only a full commit, not a
+branch name):
+
+```sh
+git ls-remote https://github.com/hudsonwa/twin refs/heads/next   # prints the commit, then refs/heads/next
+hermes plugins install hudsonwa/twin --ref <that commit> --enable
+```
+
+Without `--enable` Hermes asks whether to switch the plugin on; over a remote shell it cannot ask and leaves it
+off, and `hermes plugins enable grok-bot-twin` switches it on.
 
 ### One setup command
 

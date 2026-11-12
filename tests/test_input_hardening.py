@@ -196,14 +196,14 @@ def test_conflict_text_is_masked_and_escape_free(svc, monkeypatch):
     key = fake_key()
     raw = {"conflicts": [{
         "conflict_id": "skill:greet-visitors", "kind": "skill", "name": "greet-visitors", "since": "not a time",
-        "grok": {"digest": "abc", "text": f"line one\nkey {key}\n\x1b]0;pwned\x07\x9b31m‮evil\n"},
+        "grok": {"digest": "abc", "text": f"line one\nkey {key}\n\x1b]0;pwned\x07\x9b31m\u202eevil\n"},
         "hermes": {"digest": "def", "text": "line one\n"},
         "diff": f"--- grok\n+++ hermes\n-key {key}\n\x1b[2J\r+line one\n"}]}
     _route(svc, monkeypatch, _StubEngine(conflicts=raw))
     c = svc.conflicts("acme-support")["conflicts"][0]
     blob = json.dumps(c, ensure_ascii=False)
     assert key not in blob and "not shown: looks like a password or key" in c["grok"]["text"]
-    for ch in ("\x1b", "\x07", "\x9b", "‮", "\r"):
+    for ch in ("\x1b", "\x07", "\x9b", "\u202e", "\r"):
         assert ch not in c["grok"]["text"] and ch not in c["diff"]
     assert "\n" in c["diff"] and c["diff"].startswith("--- grok")
     assert c["since"] is None
@@ -225,8 +225,8 @@ def test_restore_points_are_allowlisted_and_cleaned(svc, monkeypatch):
 
 def test_engine_profile_name_is_cleaned_for_display():
     from hermes_plugins.grok_bot_twin.twin.model import normalize_pair
-    p = normalize_pair({"pair_id": "acme-support", "hermes": {"profile": "acme\x1b[2J‮"}})
-    assert "\x1b" not in p["hermes"]["profile"] and "‮" not in p["hermes"]["profile"]
+    p = normalize_pair({"pair_id": "acme-support", "hermes": {"profile": "acme\x1b[2J\u202e"}})
+    assert "\x1b" not in p["hermes"]["profile"] and "\u202e" not in p["hermes"]["profile"]
 
 
 def test_slash_messaging_is_read_only(monkeypatch):

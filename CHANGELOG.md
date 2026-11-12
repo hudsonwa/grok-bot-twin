@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 (12 November 2026)
+
+- Installs from GitHub again without `--force`: Hermes' install scan stopped the install because three source
+  lines held invisible characters typed in raw form. Those characters are now written as escapes (`\u200b`), in
+  the tests too, and a new test fails if any file of the plugin holds a raw invisible or text-direction character.
+- README: names the minimum Hermes version (0.22.7) and the install line for the `next` branch, and no longer
+  points to a catalog file that is not in this repository.
+
 ## 0.3.2 (12 November 2026)
 
 - Hermes to Grok out of beta: there is no switch for the whole plugin any more. It is off for every twin until you

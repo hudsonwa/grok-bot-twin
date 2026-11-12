@@ -275,7 +275,7 @@ def test_the_release_tool_writes_only_what_it_checked(tmp_path):
     assert pins.PINS_FILE.read_bytes() == before
 
 
-@pytest.mark.parametrize("mark", ["​", "⁠", "﻿", "‮"])
+@pytest.mark.parametrize("mark", ["\u200b", "\u2060", "\ufeff", "\u202e"])
 def test_a_key_with_an_invisible_character_inside_is_hidden_all_the_same(mark):
     """The page drops invisible characters from what it shows, so the password-and-key check reads the text without
     them: one in the middle of a key must not hide the key from the check and then vanish from the shown text."""

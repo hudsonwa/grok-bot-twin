@@ -64,7 +64,7 @@ CRON_RE = re.compile(r"^[0-9A-Za-z*/,\-#?]+(?: [0-9A-Za-z*/,\-#?]+){4,6}\Z")
 _CRON_NAMES = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|MON|TUE|WED|THU|FRI|SAT|SUN"
 _CRON_WORD = r"(?:[0-9*?LW#/,-]+|(?:%s)(?:[-,/](?:[0-9]+|%s))*)" % (_CRON_NAMES, _CRON_NAMES)
 SCHEDULE_RE = re.compile(r"^%s(?: %s){4,6}\Z" % (_CRON_WORD, _CRON_WORD), re.I)
-_CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f​-‏ -‮⁠-⁯﻿\ud800-\udfff]")
+_CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ud800-\udfff]")
 _LOCK = threading.RLock()
 
 # words for the owner (the page and the terminal show these unchanged)

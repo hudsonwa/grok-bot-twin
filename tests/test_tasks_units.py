@@ -79,7 +79,7 @@ def test_no_worker_thread_until_the_switch_was_used(linked):
 def test_requests_and_answers_are_cleaned_capped_and_stable():
     key = "sk-" + "Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Ii9J"
     assert key not in tasks.clean_request(f"use {key} please") and "please" in tasks.clean_request(f"use {key} please")
-    assert tasks.clean_request("a\x00b\x1b[31mc‮") == "ab[31mc"
+    assert tasks.clean_request("a\x00b\x1b[31mc\u202e") == "ab[31mc"
     assert tasks.clean_request("line one\nline two") == "line one\nline two"
     assert tasks.clean_request(None) == "" and tasks.clean_request(5) == "" and tasks.clean_request(" \n ") == ""
     assert len(tasks.clean_request("x" * 9000)) == tasks.REQUEST_CAP
