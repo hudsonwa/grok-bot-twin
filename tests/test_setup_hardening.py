@@ -277,18 +277,16 @@ def test_a_missing_gh_is_not_reported_as_a_missing_botport(home, tmp_path, monke
 # ---- what is disclosed matches what the code does --------------------------------------------------------------
 
 def test_the_disclosure_says_what_the_copy_and_the_page_really_do():
-    manifest = (ROOT / "plugin.yaml").read_text(encoding="utf-8")
     disclosure = (ROOT / "docs" / "DISCLOSURE.md").read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8")
     page = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
     flat = lambda text: " ".join(text.split())  # noqa: E731
     # the size cap in words is the one in the code
     assert f"at most {connect.HELPER_CAP // (1024 * 1024)} MB" in flat(disclosure) and "200 MB" not in disclosure
-    # the copy of botport carries no download mark on macOS, and all three texts say what stands in for it
-    for text in (manifest, disclosure, readme):
-        assert "download mark" in flat(text) and "Gatekeeper" in text
-    # what the page keeps outside the data folder is named, and so is what clears it
-    for text in (manifest, disclosure, readme):
+    # the copy of botport carries no download mark on macOS, and the disclosure says what stands in for it
+    assert "download mark" in flat(disclosure) and "Gatekeeper" in disclosure
+    # what the page keeps outside the data folder is named, and so is what clears it (the README's guide: Uninstall)
+    for text in (disclosure, readme):
         assert "Hermes Desktop's storage" in flat(text) and "cannot reach" in flat(text)
     assert "Not in this folder" in disclosure and "hermes.plugin.grok-bot-twin." in disclosure
     # every kind of note the page keeps per twin is one the page clears when the twin goes
@@ -300,5 +298,5 @@ def test_the_disclosure_says_what_the_copy_and_the_page_really_do():
     # and while such a note is left, the page keeps offering the button that clears it
     assert "(hasData || notesLeft(storage)) &&" in page and "keeps offering" in flat(disclosure)
     # the terminal route never tells anyone to unpack an archive
-    for text in (manifest, readme, disclosure):
+    for text in (readme, disclosure):
         assert "tar -x" not in text

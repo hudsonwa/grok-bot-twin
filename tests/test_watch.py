@@ -435,7 +435,7 @@ def test_a_rename_in_grok_reaches_the_twin_in_seconds(rig, capsys):  # noqa: F81
 # ---- what the copy says is what the code does -----------------------------------------------------------------------
 
 def test_the_claim_in_seconds_is_backed_by_the_default(home):
-    """"In seconds" may stand in the README and the manifest only while the fast check is on by default and
+    """"In seconds" may stand in the README only while the fast check is on by default and
     disclosed; whoever turns the default off has to change the copy in the same commit."""
     import yaml
     from twin_testlib import ROOT
@@ -444,11 +444,12 @@ def test_the_claim_in_seconds_is_backed_by_the_default(home):
     assert entry["type"] == "bool" and entry["default"] is True is config.DEFAULTS["watch_grok_changes"]
     assert m["config_schema"]["sync_interval_seconds"]["default"] == config.DEFAULTS["sync_interval_seconds"] == 60
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8")  # How fast and Settings moved there (R14b)
     disclosure = (ROOT / "docs" / "DISCLOSURE.md").read_text(encoding="utf-8")
-    assert "in seconds" in m["description"] and "in seconds" in readme
+    assert "in seconds" in readme
     assert watch.MAX_GAP < config.DEFAULTS["sync_interval_seconds"]  # the paced worst case beats the timed check
     assert watch.POLL_S >= 2.0, "no polling loop faster than every 2 s, and only where the system cannot wake us"
-    for text in (m["description"], readme, disclosure):  # the new read and the second thread are disclosed
-        assert "sand-client-persistence" in text and "watch_grok_changes" in text
+    # the new read and the second thread are disclosed (in the one disclosure), and the switch is in the guide
+    assert "sand-client-persistence" in disclosure and "watch_grok_changes" in disclosure
     assert "grok-bot-twin-watch" in disclosure and "opened for reading" in disclosure
-    assert "`watch_grok_changes`" in readme and "## How fast is it?" in readme
+    assert "`watch_grok_changes`" in guide and "## How fast is it?" in guide

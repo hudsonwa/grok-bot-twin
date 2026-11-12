@@ -138,7 +138,7 @@ class FinishMixin:
     def _apply_copied(self, p: dict, mine: dict) -> None:
         """Skills (and the description) the owner pasted into Grok by hand stop asking: they leave `waiting`, `to_grok_items`, the
         by-hand list and the counts, for as long as the Hermes version is the one that was pasted. A later change
-        in Hermes forgets the note, so the skill asks again. The same holds for a routine that an imported setup
+        in Hermes outdates the note, so the skill asks again. The same holds for a routine that an imported setup
         export brought over: Grok is where it came from, so its Hermes copy does not ask to be carried to Grok
         until it is changed in Hermes."""
         if not mine:
@@ -160,14 +160,6 @@ class FinishMixin:
                 got = hs.skill_text(home, item.split(":", 1)[1]) if item.startswith("skill:") else None
             if got is None or hs.text_digest(got[0]) != digest:
                 stale.append(item)
-        if stale:
-            with store.locked():
-                data = self._copied()
-                for item in stale:
-                    data.get(p["pair_id"], {}).pop(item, None)
-                if not data.get(p["pair_id"]):
-                    data.pop(p["pair_id"], None)
-                store.atomic_write_json(self.central / "copied.json", data)
         done = set(mine) - set(stale)
         if not done:
             return
@@ -429,8 +421,7 @@ class FinishMixin:
         if not entry or p["state"] == "error":
             return
         if not int(p["pending"].get("to_hermes") or 0):
-            self._note_stuck(p["pair_id"], None)  # nothing is waiting any more: it went through some other way
-            return
+            return  # nothing is waiting any more (the timer's tick forgets the note: save_status)
         name = p["grok"]["name"] or "this twin"
         span = hs.own_block_lines(self._profile_home(p["hermes"]["profile"]))
         line = entry.get("line") if isinstance(entry.get("line"), int) else 0

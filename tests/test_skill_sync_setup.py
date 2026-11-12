@@ -58,6 +58,7 @@ def fake(home, tmp_path, monkeypatch):
     svc = service.get_service()
     svc.trust_botport(True)
     svc.status(fresh=True)
+    svc.save_status()  # (the timer's tick takes in a twin made outside the plugin)
     pairs = central(home) / "botport-state" / "pairs"
     (pairs / "acme-support.brief").mkdir(parents=True)
     (pairs / "acme-support.key").write_text(PASS)

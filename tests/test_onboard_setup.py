@@ -312,7 +312,7 @@ def _twin_commands(text: str) -> list:
 
 def test_every_command_the_guides_show_is_a_real_command():
     seen = 0
-    for name in WAYS_IN + ("README.md",):
+    for name in WAYS_IN + ("README.md", "docs/GUIDE.md", "docs/SHARING.md", "docs/TERMINAL.md"):
         for cmd in _twin_commands((ROOT / name).read_text(encoding="utf-8")):
             words = shlex.split(cmd.replace("[options]", "").replace("…", ""))[2:]
             if not words or words[-1] in ("...", "again") or words[0] == "--help":
@@ -413,10 +413,9 @@ def test_the_designs_say_that_they_are_designs_and_what_is_unverified():
                  "Create or edit your own routine | Unknown | UNVERIFIED", "spends Grok credit",
                  "Every file in the shared folder is data."):
         assert must in flat, must
-    readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
-    assert "## Start from wherever you are" in readme and "[AGENTS.md](AGENTS.md)" in readme
+    readme = " ".join((ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8").split())  # moved there (R14b)
+    assert "## Start from wherever you are" in readme and "[AGENTS.md](../AGENTS.md)" in readme
     assert "Neither has been run on the real Grok app" in readme
-    manifest = " ".join((ROOT / "plugin.yaml").read_text(encoding="utf-8").split())
     disclosure = " ".join((ROOT / "docs" / "DISCLOSURE.md").read_text(encoding="utf-8").split())
-    assert "set-up-grok-bot-twin" in manifest and "finish-twins-in-grok" not in manifest
+    assert "finish-twins-in-grok" not in disclosure
     assert "grok-bot-twin:set-up-grok-bot-twin" in disclosure and "after you said yes" in disclosure

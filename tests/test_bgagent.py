@@ -534,20 +534,20 @@ def test_the_hint_after_linking_appears_only_when_it_helps(linux, monkeypatch, t
 def test_everything_the_helper_runs_and_writes_is_disclosed():
     import yaml
     from twin_testlib import ROOT
-    manifest = yaml.safe_load((ROOT / "plugin.yaml").read_text(encoding="utf-8"))["description"]
+    assert "docs/DISCLOSURE.md" in yaml.safe_load((ROOT / "plugin.yaml").read_text(encoding="utf-8"))["description"]
     disclosure = (ROOT / "docs" / "DISCLOSURE.md").read_text(encoding="utf-8")
-    for words in ("systemctl --user", "launchctl", "hermes twin background on", "hermes twin fleet run", "never root"):
-        assert words in manifest, words
+    for words in ("systemctl --user", "launchctl", "hermes twin background on", "hermes twin fleet run"):
+        assert words in disclosure, words
     for words in (f"{bgagent.UNIT_BASE}.service", f"{bgagent.LAUNCHD_BASE}.plist", bgagent.LOG_NAME,
                   "daemon-reload", "`enable`", "`restart`", "`disable --now`", "`reset-failed`", "`show`",
                   "launchctl bootstrap", "`bootout`", "`print`", "/bin/launchctl", "XDG_CONFIG_HOME",
                   " ".join(("hermes",) + bgagent.FOLLOW_ARGS), "never as root", "/bin/sh -c", "hermes twin --help",
                   "exit status 2, 126, 127 or 203"):
         assert words in disclosure, words
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    sharing = (ROOT / "docs" / "SHARING.md").read_text(encoding="utf-8")  # the user's side (moved from the README)
     for words in ("hermes twin background on", "hermes twin background off", "systemd user unit", "launchd agent",
                   "never as root", "95 MB"):
-        assert words in readme, words
+        assert words in sharing, words
 
 
 def test_the_launchd_guard_ends_quietly_when_the_command_is_gone_and_otherwise_becomes_it(tmp_path):

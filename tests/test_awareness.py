@@ -210,7 +210,7 @@ def test_twin_status_plain_language(svc):
     svc.approve("acme-support", "skill:fun-fact")
     svc.invalidate()
     t = json.loads(tools.twin_status({}))["twins"][0]
-    assert t["state"] == "Updating" and t["changes_waiting"] == 1
+    assert t["state"] == "Updating…" and t["changes_waiting"] == 1
     assert 'Copy the Hermes version of the skill "fun-fact" into Grok yourself, or turn on skill sync to carry it' \
         in t["to_do_in_grok"]
     svc.mirror("acme-support")

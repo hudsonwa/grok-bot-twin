@@ -445,7 +445,6 @@ const thingsLeft = pair => leftOf(pair)?.length ?? 0
 // The sample that can show both of its sides: it is there to be watched, so its set-up chores are not
 // counted as something left for the owner (they stay in its menu, to try).
 const sampleShown = pair => isSample(pair) && typeof pair?.grok?.description === 'string' && typeof pair?.hermes?.description === 'string'
-const choresLeft = pair => (sampleShown(pair) ? 0 : thingsLeft(pair))
 
 // Suspected secrets, one entry per place ("description", "skill greet-visitors").
 function secretPlaces(pair) {
@@ -484,29 +483,25 @@ const isSkillItem = item => /^skills?:/.test(clean(item, 120))
 
 // Every open matter of a twin, in the order a person should deal with them: what blocks everything,
 // then a choice between two versions, then what is ready to go, then the possible password (which
-// clears by itself once it is taken out in Grok). Each matter has one sentence for the row and a
-// short title for its header; only one is open at a time.
+// clears by itself once it is taken out in Grok). Each matter has a short title for its box; only one is open at
+// a time. (The row's sentence is the server's: twin/model.py `view` counts the same matters.)
 function mattersOf(pair) {
   const out = []
   const pending = pair?.pending ?? {}
-  const conflicts = Number(pair?.conflicts) || 0
+  const conflicts = (Number(pair?.conflicts) || 0) + listOf(pair?.open_conflicts).length
 
   if (pair?.state === 'error') {
-    out.push({ id: 'error', kind: 'error', short: "Can't check right now", title: "Can't check right now" })
+    out.push({ id: 'error', kind: 'error', title: "Can't check right now" })
   }
 
   if (pair?.state === 'grok_missing' || pair?.grok?.present === false) {
-    out.push({ id: 'missing', kind: 'missing', short: 'Not in Grok any more', title: 'Not in Grok any more' })
+    out.push({ id: 'missing', kind: 'missing', title: 'Not in Grok any more' })
   }
 
   if (conflicts > 0) {
     const title = conflicts === 1 ? 'Something changed in both places' : `${conflicts} things changed in both places`
 
-    out.push({ id: 'conflict', kind: 'conflict', short: conflicts === 1 ? 'Changed in both places' : title, title })
-  }
-
-  for (const c of Array.isArray(pair?.open_conflicts) ? pair.open_conflicts.slice(0, 10) : []) {
-    out.push({ id: `choose-${clean(c?.where, 20)}-${clean(c?.item, 120)}`, kind: 'choose', short: 'Changed in both places', title: 'Changed in both places' })
+    out.push({ id: 'conflict', kind: 'conflict', title })
   }
 
   for (const w of Array.isArray(pair?.waiting) ? pair.waiting.slice(0, 30) : []) {
@@ -517,7 +512,7 @@ function mattersOf(pair) {
     const kind = itemParts(w.item).kind
     const title = w.to === 'grok' ? `A ${kind} changed in Hermes` : w.to === 'hermes' ? `A ${kind} from Grok is ready` : 'Something is waiting for your go-ahead'
 
-    out.push({ id: `waiting-${clean(w.item, 120)}`, kind: 'waiting', short: w.to === 'grok' ? '1 change to send to Grok' : title, title, waiting: w })
+    out.push({ id: `waiting-${clean(w.item, 120)}`, kind: 'waiting', title, waiting: w })
   }
 
   if ((Number(pending.to_grok) || 0) > 0) {
@@ -528,18 +523,15 @@ function mattersOf(pair) {
     const other = items.filter(i => !isSkillItem(i))
     const title = other.length === 0 ? `${plural(n, 'skill change')} ready for Grok` : n === 1 ? `${capital(itemPhrase(other[0]))} changed in Hermes` : `${plural(n, 'change')} ready for Grok`
 
-    out.push({ count: n, id: 'unsent', kind: 'unsent', short: `${plural(n, 'change')} to send to Grok`, title })
+    out.push({ count: n, id: 'unsent', kind: 'unsent', title })
   }
 
   for (const place of secretPlaces(pair)) {
-    out.push({ id: `secret-${place.item}`, kind: 'secret', short: 'A password or key was not copied', title: 'A password or key was not copied', ...place })
+    out.push({ id: `secret-${place.item}`, kind: 'secret', title: 'A password or key was not copied', ...place })
   }
 
   return out
 }
-
-// A matter that only asks "send this to Grok?" is not an alarm.
-const isToSend = m => m.kind === 'unsent' || (m.kind === 'waiting' && m.waiting?.to === 'grok')
 
 // Does this matter's box hold a main button the owner can press right now? (A real possible password is
 // fixed in Grok: no button.) Two versions to choose between have one too: keeping the Hermes version, the
@@ -567,79 +559,26 @@ const shortDay = iso => {
   return `${d.getDate()} ${new Intl.DateTimeFormat('en', { month: 'short' }).format(d)}`
 }
 
-const FOLLOWS = 'Follows Grok'
 const NOT_FOLLOWING = 'Not following Grok right now'
 const WAITING_FOR_MODEL = 'Waiting for you to choose a model in Hermes'
 
-// The one status sentence of a row. `held`: twins cannot follow Grok at all right now, and the banner
-// above the rows says why once; a row then says only that. `asked`: the owner was sent to Hermes to
-// choose this twin's model and has not done it yet. A twin with an open matter and set-up left says both.
+// The row's sentence and its shape are the server's (twin/model.py `view`: the terminal and a chat say the same
+// words). The page adds only what it alone knows. `held`: twins cannot follow Grok at all right now, and the
+// banner above the rows says why once; a row then says only that. `asked`: this page sent the owner to Hermes to
+// choose this twin's model, not done yet.
 function statusSentence(pair, { held = false, asked = false } = {}) {
-  const matters = mattersOf(pair)
-  const pending = pair?.pending ?? {}
-  // (the sample shows the point first, a twin following its bot: its set-up chores wait in its menu)
-  const left = sampleShown(pair) ? [] : leftOf(pair)
-  const leftText = left?.length ? `${plural(left.length, 'thing')} left` : ''
-  const andLeft = text => (leftText ? `${text} · ${leftText}` : text)
+  if (held && !isSample(pair)) return NOT_FOLLOWING
+  if (pair?.state === 'error' || !pair?.sentence) return stateOf(pair?.state).label
+  const left = leftOf(pair)
 
-  if (held && !isSample(pair)) {
-    return NOT_FOLLOWING
-  }
-
-  if (matters.some(m => m.kind === 'error')) {
-    return STATE.error.label
-  }
-
-  if (matters.some(m => m.kind === 'missing')) {
-    return STATE.grok_missing.label
-  }
-
-  if (matters.length > 1) {
-    const toSend = matters.filter(isToSend).reduce((n, m) => n + (m.count ?? 1), 0)
-
-    return andLeft(matters.every(isToSend) ? `${plural(toSend, 'change')} to send to Grok` : `${matters.length} things need you`)
-  }
-
-  if (matters.length === 1) {
-    return andLeft(matters[0].short)
-  }
-
-  if ((Number(pending.to_hermes) || 0) > 0) {
-    return STATE.changes_waiting.label
-  }
-
-  if ((Number(pending.in_flight) || 0) > 0) {
-    return `${plural(Number(pending.in_flight), 'change')} on the way to Grok`
-  }
-
-  if (left?.length) {
-    return asked && left.length === 1 && left[0] === 'model' ? WAITING_FOR_MODEL : `Almost ready · ${leftText}`
-  }
-
-  if (pair?.switched?.at) {
-    const n = Number(pair.switched.routines_on) || 0
-
-    return n ? `${FOLLOWS} · ${plural(n, 'routine')} ${n === 1 ? 'runs' : 'run'} in Hermes` : FOLLOWS
-  }
-
-  // the plain calm state says the word a new owner waits for after setting up
-  return isSample(pair) ? FOLLOWS : `${FOLLOWS} · ready`
+  return asked && pair.tone === 'todo' && !pair.needs && left?.length === 1 && left[0] === 'model' ? WAITING_FOR_MODEL : clean(pair.sentence, 200)
 }
 
 // The shape next to the sentence: trouble is a triangle, a to-do is a half-filled circle, something to
 // send is an arrow. A to-do is not a warning.
-function rowTone(pair, { held = false } = {}) {
-  const matters = mattersOf(pair)
-
-  if (held && !isSample(pair)) return 'muted'
-  if (matters.some(m => m.kind === 'error')) return 'bad'
-  if (matters.some(m => m.kind === 'missing')) return 'muted'
-  if (matters.length > 0) return matters.every(isToSend) ? 'send' : matters.every(m => m.kind === 'waiting') ? 'todo' : 'warn'
-  if ((Number(pair?.pending?.to_hermes) || 0) > 0 || (Number(pair?.pending?.in_flight) || 0) > 0) return 'busy'
-  if (choresLeft(pair) > 0) return 'todo'
-
-  return 'good'
-}
+const TONES = ['good', 'busy', 'todo', 'send', 'warn', 'muted', 'bad']
+const rowTone = (pair, { held = false } = {}) =>
+  held && !isSample(pair) ? 'muted' : pair?.state !== 'error' && TONES.includes(pair?.tone) ? pair.tone : stateOf(pair?.state).tone
 
 // When this twin was last looked at: the newest of the background round, the twin's own record and a
 // check pressed on this page a moment ago (so "checked 37 sec ago" never follows a check by seconds).
@@ -871,14 +810,8 @@ const ATTENTION_STATES = ['needs_you', 'changes_waiting']
 
 // Why a twin that had nothing new is still not up to date, in plain words.
 function attentionReason(entry, cached) {
-  const matters = cached ? mattersOf(cached) : []
-
-  if (matters.length > 1) {
-    return statusSentence(cached).replace(/^[A-Z]/, c => c.toLowerCase())
-  }
-
-  if (matters.length === 1) {
-    return matters[0].short.replace(/^[A-Z]/, c => c.toLowerCase())
+  if (cached?.needs) {
+    return statusSentence(cached).split(' · ')[0].replace(/^[A-Z]/, c => c.toLowerCase())
   }
 
   if (cached && thingsLeft(cached) > 0) {
@@ -1593,7 +1526,7 @@ function onlyChanged(rows) {
 
 // One thing that changed in both places: two cards, each one a choice that says what happens.
 // `onVersions` opens the list of earlier versions (the words "Earlier versions" are the link).
-function ConflictItem({ pairId, conflict, onVersions, lead = false, initialShowDiff = false, carry = false }) {
+function ConflictItem({ pairId, conflict, onVersions, onToGrok, lead = false, initialShowDiff = false, carry = false }) {
   const [busy, run] = useBusy()
   const [showDiff, setShowDiff] = useState(initialShowDiff)
   const hermesText = conflict?.hermes?.text
@@ -1623,7 +1556,7 @@ function ConflictItem({ pairId, conflict, onVersions, lead = false, initialShowD
     const res = await run(
       side,
       async () => {
-        const out = await post(pairPath(pairId, 'resolve'), { conflict_id: conflict.conflict_id, keep: side })
+        const out = await (conflict.settle ? conflict.settle(side) : post(pairPath(pairId, 'resolve'), { conflict_id: conflict.conflict_id, keep: side }))
 
         // the kept text goes on the clipboard in the same click, when the owner carries it into Grok by hand
         if (side === 'hermes' && carry) {
@@ -1683,7 +1616,10 @@ function ConflictItem({ pairId, conflict, onVersions, lead = false, initialShowD
       el('h3', { className: HEADING }, `${capital(what)} changed in both places.`),
       since && el('span', { className: SMALL, title: 'Changed words are highlighted.' }, `Different since ${since}.`)
     ),
-    el('div', { className: 'grid gap-3 sm:grid-cols-2' }, card('hermes', conflict?.hermes, marked[0]), card('grok', conflict?.grok, marked[1])),
+    // (what Hermes -> Grok holds back is chosen in its own sheet, next to the change it would send)
+    conflict?.toGrok
+      ? el(Button, { className: 'self-start', onClick: onToGrok, variant: lead ? 'default' : 'secondary' }, 'Changes to Grok…')
+      : el('div', { className: 'grid gap-3 sm:grid-cols-2' }, card('hermes', conflict?.hermes, marked[0]), card('grok', conflict?.grok, marked[1])),
     conflict?.text_truncated && el('p', { className: SMALL }, 'Long text: only the first part of each version is shown.'),
     hasDiff &&
       el(
@@ -1700,10 +1636,23 @@ function ConflictItem({ pairId, conflict, onVersions, lead = false, initialShowD
   )
 }
 
-function ConflictBox({ pair, onVersions, lead = false }) {
+// Every choice between two versions of a twin, for the one box: botport's own, the instructions sync's card
+// (Grok's instructions from a setup export, settled by its own route) and what Hermes -> Grok holds back.
+async function conflictsOf(pair) {
+  const pid = pair.pair_id
+  const open = listOf(pair?.open_conflicts)
+  const own = (Number(pair?.conflicts) || 0) > 0 ? listOf((await api(pairPath(pid, 'conflicts')))?.conflicts) : []
+  const c = open.some(o => o?.where === 'instructions') ? (await api(pairPath(pid, 'instructions-sync')))?.conflict : null
+  const card = c && { conflict_id: 'instructions', grok: { text: c.grok }, hermes: { text: c.hermes }, kind: 'instructions', settle: keep => post(pairPath(pid, 'instructions-sync/resolve'), { choice: keep, grok_digest: c.grok_digest }), since: c.at }
+  const toGrok = open.filter(o => o?.where === 'to_grok' && typeof o.item === 'string').map(({ item }) => ({ conflict_id: `to-grok:${item}`, kind: item, toGrok: true }))
+
+  return { conflicts: [...own, ...(card ? [card] : []), ...toGrok] }
+}
+
+function ConflictBox({ pair, onVersions, onToGrok, lead = false }) {
   const q = useQuery({
-    queryFn: () => api(pairPath(pair.pair_id, 'conflicts')),
-    queryKey: [ID, 'conflicts', pair.pair_id, pair.conflicts],
+    queryFn: () => conflictsOf(pair),
+    queryKey: [ID, 'conflicts', pair.pair_id, pair.conflicts, listOf(pair.open_conflicts).length],
     // an earlier answer for the same key may be "none": always ask again when the box appears, and keep asking
     // while the answer is empty (the change may be a moment ahead of this route; the status refresh removes the
     // box when there really is nothing left to choose)
@@ -1733,7 +1682,7 @@ function ConflictBox({ pair, onVersions, lead = false }) {
               el(
                 'div',
                 { className: cn(i > 0 && 'border-t border-(--ui-stroke-tertiary) pt-3'), key: c?.conflict_id ?? i },
-                jsx(ConflictItem, { carry: !isSkillItem(c?.conflict_id) || !skillSyncOn(pair), conflict: c, lead: lead && i === 0, onVersions, pairId: pair.pair_id })
+                jsx(ConflictItem, { carry: !isSkillItem(c?.conflict_id) || !skillSyncOn(pair), conflict: c, lead: lead && i === 0, onToGrok, onVersions, pairId: pair.pair_id })
               )
             )
   )
@@ -2351,20 +2300,6 @@ function UnsentBox({ pair, count, onSkillSync, lead }) {
 // ── details: what copies over, earlier versions, recent activity ────────────
 // One sheet with three sections, instead of four separate read-only sheets in the menu.
 
-// Older engine values map onto the four groups.
-const COVERAGE_ALIAS = { on_export: 'syncs_via_mirror', 'n/a': 'not_carried' }
-const coverageValue = v => COVERAGE_ALIAS[v] ?? v
-
-// What every twin does when the backend sent no list of its own (the product's fixed table).
-const DEFAULT_COVERAGE = [
-  { g2h: 'syncs', h2g: 'by_hand', item: 'name' },
-  { g2h: 'syncs', h2g: 'by_hand', item: 'description' },
-  { g2h: 'by_hand', h2g: 'by_hand', item: 'instructions' },
-  { g2h: 'syncs_via_mirror', h2g: 'syncs_via_mirror', item: 'skills' },
-  { g2h: 'by_hand', h2g: 'by_hand', item: 'routines' },
-  { g2h: 'by_hand', h2g: 'by_hand', item: 'connectors' }
-]
-
 // The whole table: what copies over and how, for every twin. Its rows are not typed here: twin/copies.py holds
 // them and writes them between the two marks below (a test compares the two), so the page, the README and the
 // disclosure always say the same.
@@ -2432,12 +2367,12 @@ function WholeTable() {
   )
 }
 
+// The twin's coverage rows as the server sends them (twin/model.py: its one table, values already checked).
 function coverageGroups(coverage, dir) {
   const groups = { by_hand: [], not_carried: [], syncs: [], syncs_via_mirror: [] }
-  const rows = Array.isArray(coverage) && coverage.length ? coverage.slice(0, 20) : DEFAULT_COVERAGE
 
-  for (const row of rows) {
-    const group = groups[coverageValue(row?.[dir])]
+  for (const row of listOf(coverage).slice(0, 20)) {
+    const group = groups[row?.[dir]]
     const item = kindLabel(row?.item)
 
     if (group && item) {
@@ -5720,12 +5655,11 @@ function TwinRow({ pair, storage, lastCheckAt, intervalS, fastCheck, held: pageH
         m.id
       )
     }
-    if (m.kind === 'conflict') return jsx(ConflictBox, { lead: mine, onVersions: () => details('versions'), pair }, m.id)
+    if (m.kind === 'conflict') return jsx(ConflictBox, { lead: mine, onToGrok: () => setSheet('to-grok'), onVersions: () => details('versions'), pair }, m.id)
     if (m.kind === 'secret') return jsx(SecretBox, { lead: mine, pair, place: m }, m.id)
     if (m.kind === 'waiting') return jsx(WaitingBox, { lead: mine, onSkillSync: () => setSheet('sync'), pair, waiting: m.waiting }, m.id)
-    if (m.kind === 'unsent') return jsx(UnsentBox, { count: m.count, lead: mine, onSkillSync: () => setSheet('sync'), pair }, m.id)
 
-    return el('span', { key: m.id })
+    return jsx(UnsentBox, { count: m.count, lead: mine, onSkillSync: () => setSheet('sync'), pair }, m.id) // (the last kind)
   }
 
   return el(
@@ -10130,11 +10064,11 @@ function summarize(pairs, { held = false } = {}) {
     return { count: 1, label: `${who} · not following Grok right now`, tone: 'warn' }
   }
 
-  // A twin whose only open matter is a skill change to send is "to send", not an alarm (as in its row).
-  const open = pairs.filter(p => mattersOf(p).length > 0)
-  const attention = open.filter(p => !mattersOf(p).every(isToSend))
-  const sending = open.length - attention.length
-  const finishing = pairs.filter(p => choresLeft(p) > 0).length
+  // Counted from the server's `needs` and `ready` (twin/model.py `view`), as the terminal counts them: a twin
+  // whose only open matter is a change to send is "to send", not an alarm.
+  const attention = pairs.filter(p => p?.needs === 'you' || p?.state === 'error')
+  const sending = pairs.filter(p => p?.needs === 'send' && p?.state !== 'error').length
+  const finishing = pairs.filter(p => p?.ready === false).length
   const failing = attention.some(p => p?.state === 'error')
   const updating = pairs.some(p => (Number(p?.pending?.to_hermes) || 0) > 0)
   const parts = [
@@ -10144,7 +10078,7 @@ function summarize(pairs, { held = false } = {}) {
   ].filter(Boolean)
   const what = parts.length ? parts.join(' · ') : updating ? 'updating' : 'nothing needs you'
 
-  return { count: attention.length, label: `${who} · ${what}`, tone: failing ? 'bad' : open.length || updating || finishing ? 'warn' : 'good' }
+  return { count: attention.length, label: `${who} · ${what}`, tone: failing ? 'bad' : attention.length || sending || updating || finishing ? 'warn' : 'good' }
 }
 
 // Why the owner's twins cannot follow Grok right now, as one cause for the whole page: said once, in a
@@ -10298,7 +10232,7 @@ function TwinsPage({ storage, initialBack = 'idle', initialMountedAt = null }) {
     : (pairs.find(p => {
         const open = openOf(p)
 
-        return (open.length > 0 && hasMainAction(open[0], p)) || choresLeft(p) > 0
+        return (open.length > 0 && hasMainAction(open[0], p)) || p?.ready === false
       })?.pair_id ?? null)
 
   const firstOpenId = pairs.find(p => openOf(p).some(m => !(m.kind === 'error' && grouped?.has(p?.pair_id))))?.pair_id ?? null

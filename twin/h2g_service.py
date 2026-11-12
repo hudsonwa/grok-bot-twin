@@ -121,9 +121,10 @@ class H2GMixin:
         return NoMirrorWriter()
 
     def _h2g_grok_side(self, bot: str) -> Optional[dict]:
-        """The bot as botport last read it from the Grok app on this computer (the status cache; no engine call)."""
+        """The bot as botport last read it from the Grok app (the cached status, no engine call). Runs inside
+        store.locked() (H2G's apply/undo/resolve), so never status(): its lock comes first (store.not_inside)."""
         try:
-            for p in self.status(allow_engine=False).get("pairs") or []:
+            for p in (self.cached_status(compute=False) or {}).get("pairs") or []:
                 g = p.get("grok") or {}
                 if g.get("id") == bot and g.get("present", True):
                     return g

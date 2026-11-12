@@ -596,10 +596,9 @@ def test_real_twin_skill_text_and_pasted_it(twin, home, monkeypatch):
     assert p["waiting"] == [] and p["pending"]["waiting_approval"] == 0 and p["skipped"] == []
     assert json.loads((central(home) / "copied.json").read_text()) == {
         "acme-support": {"skill:pick-a-book": hs.text_digest("# Pick a book\nSuggest one book.\n")}}  # a digest, no text
-    # the skill changes in Hermes later: it asks again, and the note is forgotten
+    # the skill changes in Hermes later: it asks again
     (d / "SKILL.md").write_text("# Pick a book\nSuggest two books.\n", encoding="utf-8")
-    assert [w["item"] for w in _pair(svc)["waiting"]] == ["skill:pick-a-book"]
-    assert not json.loads((central(home) / "copied.json").read_text())
+    assert [w["item"] for w in _pair(svc)["waiting"]] == ["skill:pick-a-book"]  # (the note no longer matches)
     # "keep in Hermes only" also covers what to_grok counts
     svc.skip("acme-support", "skill:rate-a-book")
     p = _pair(svc)
@@ -819,6 +818,7 @@ def test_a_twin_botport_stopped_updating_says_which_line_and_how_to_fix_it(twin,
     assert out["state"] == "error" and out["error"]["code"] == "secret_refused"
     p = _pair(svc)
     assert p["state"] == "error" and p["error"]["code"] == "secret_refused"
+    assert (p["sentence"], p["tone"], p["needs"]) == ("Can't check right now", "bad", "you")  # R7: the server's words follow
     assert p["error"]["message"] == ("Updates from Grok stopped: line 3 of Acme Support's instructions looks like a "
                                      "password or key to botport.")
     assert "Earlier versions" in p["error"]["hint"] and "without that line" in p["error"]["hint"]
@@ -841,6 +841,8 @@ def test_a_twin_botport_stopped_updating_says_which_line_and_how_to_fix_it(twin,
     again.sync("acme-support")
     p = _pair(again)
     assert "config.yaml, line 4" in p["error"]["message"] and "Try again" in p["error"]["hint"]
-    # once nothing is waiting any more, the note goes by itself
+    # once nothing is waiting any more, the row says so and the timer's tick forgets the note
     mode(home, sync_refused={"code": "secret_refused", "message": "live file config.yaml: line 4 looks like a secret"})
-    assert _pair(again)["state"] == "in_step" and json.loads((central(home) / "stuck.json").read_text()) == {}
+    assert _pair(again)["state"] == "in_step"
+    again.save_status()
+    assert json.loads((central(home) / "stuck.json").read_text()) == {}

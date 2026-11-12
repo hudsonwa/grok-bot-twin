@@ -36,7 +36,7 @@ from .engine import (INSTALL_HINT, TRUST_HINT, UNATTESTED_TEXT, BotportEngine, E
                      find_botport, find_gh, tool_problem_text, valid_tag)
 from .model import (DIRECTIONS, KEEP_SIDES, MIRROR_NOTE, SAMPLE_PROFILE, STATE_LABELS, clean_waiting,
                     clean_withheld, derive_state, item_kind, normalize_pair, now_iso, pair_ref, parse_iso, plural,
-                    preview_lines, preview_note, valid_id, valid_item_id)
+                    preview_lines, preview_note, valid_id, valid_item_id, view)
 
 log = logging.getLogger(__name__)
 
@@ -209,7 +209,8 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
         self.demo.reserved = lambda: set(self._registry())
         self._botport: Optional[BotportEngine] = None
         self._lock = threading.RLock()
-        self._status: Optional[tuple[float, dict]] = None
+        self._status: Optional[tuple] = None  # (when, the status, botport's rows in it, pairs.json as read)
+        self._saved: Optional[dict] = None  # (the last status save_status kept)
         self.last_check_at: Optional[str] = None
         self._last_session_sync = 0.0
         self._last_activity: dict[str, float] = {}
@@ -488,13 +489,18 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
 
     # ---- status ----------------------------------------------------------------------------------
     def invalidate(self) -> None:
-        self._status = None
+        """The next status() reads again; until then lock-free readers (cached_status) keep the last snapshot."""
+        if self._status:
+            self._status = (float("-inf"), *self._status[1:])
 
     def status(self, fresh: bool = False, allow_engine: bool = True) -> dict:
+        """A pure read of files and botport: it writes nothing and publishes one finished snapshot."""
+        store.not_inside("TwinService._lock")  # THE LOCK ORDER (store.py): _lock first, never inside locked()
         with self._lock:
             if not fresh and self._status and time.monotonic() - self._status[0] < STATUS_TTL:
                 return self._status[1]
             pairs: list[dict] = []
+            got: list[dict] = []
             for raw in self._demo_status():
                 pairs.append(raw)
             reg = self._registry()
@@ -525,9 +531,7 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                     for p in got:
                         if not p["waiting"]:  # botport's status has counts only; offer the items it listed last
                             p["waiting"] = self._waiting_for(p["pair_id"])
-                    self._remember(got)
-                    reg = self._registry()
-                    pairs.extend(got)
+                    pairs.extend(got)  # (pairs.json is kept by the tick: save_status)
                     seen = {p["pair_id"] for p in got}
                     pairs.extend(self._error_pair(reg[pid], "botport no longer knows this twin", "unknown_twin",
                                                   UNKNOWN_TWIN_HINT)
@@ -549,6 +553,7 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                 if p["state"] == "error" and isinstance(p.get("error"), dict) and not cause \
                         and not p["error"].get("hint"):
                     p["error"]["hint"] = RETRY_HINT  # a twin that fails alone says the one thing to do
+                p.update(view(p))  # (the steps above can turn a twin to "error": its sentence follows)
                 p["state_reason"] = self._plain_reason(p)
                 p["checked_at"] = self._checked_at(p)
                 p["ref"] = pair_ref(p["pair_id"])
@@ -561,17 +566,30 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                    "last_check_at": self.last_check_at, "interval_s": config.get("sync_interval_seconds"),
                    "fast_check": self.fast_check_state(),
                    "profile": self.profile(), "setup": setup, "sample": self.sample_state(),
-                   "fleet": self.fleet_brief()}
-            self._status = (time.monotonic(), out)
-            self._fold_open_conflicts(pairs)  # (after the line above: reading Grok for Hermes -> Grok reads it back)
-            cache = self.central / "status-cache.json"
-            if pairs or cache.exists():  # nothing is written for an install that holds no twins
-                try:
-                    store.atomic_write_json(cache, {"at": now_iso(), "status": out})
-                except OSError:
-                    pass
-            out["has_data"] = self.has_data()
+                   "fleet": self.fleet_brief(), "has_data": self.has_data()}
+            self._fold_open_conflicts(pairs)  # (Hermes -> Grok reads Grok's side from the last snapshot, as apply does)
+            self._status = (time.monotonic(), out, got, reg)
             return out
+
+    def save_status(self) -> None:
+        """The tick keeps what the last status read learnt, once: the twins botport listed (one made outside the
+        plugin too, unless pairs.json changed after the read: a Stop twinning), refusals that no longer hold, and
+        the read itself for other processes."""
+        snap = self._status
+        if snap is None or snap[1] is self._saved:
+            return
+        (_, out, got, seen), known = snap, self._registry()
+        self._saved = out
+        self._remember([p for p in got if p["pair_id"] in known or known == seen])
+        stuck = self._stuck()
+        for p in out["pairs"]:
+            if p["pair_id"] in stuck and not p.get("demo") and p["state"] != "error" \
+                    and not int(p["pending"].get("to_hermes") or 0):
+                self._note_stuck(p["pair_id"], None)  # nothing is waiting any more: it went through some other way
+        cache = self.central / "status-cache.json"
+        if out["pairs"] or cache.exists():
+            with contextlib.suppress(OSError):
+                store.atomic_write_json(cache, {"at": now_iso(), "status": out})
 
     # ---- plain words + plugin-side filters applied to every pair in status -----------------------------------
     @staticmethod
@@ -914,6 +932,7 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                 self.status(fresh=True)
             from . import awareness
             awareness.invalidate()
+        step(self.save_status)
         if errors:
             raise errors[0]
         return len(changed)

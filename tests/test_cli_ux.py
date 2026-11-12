@@ -50,6 +50,7 @@ def bp_svc(home, tmp_path):
     s.trust_botport(True)
     s.invalidate()
     s.status(fresh=True)
+    s.save_status()  # (the timer's tick takes in a twin made outside the plugin)
     return s
 
 
@@ -95,8 +96,10 @@ def test_status_says_what_to_do_about_each_matter(svc):
     rc, out, _ = run(["status"])
     # the row's sentence, as on the page: the change kept in Hermes still waits to go to Grok, and the password
     assert rc == 1 and "Acme Support (sample): 2 things need you" in out
-    assert out.splitlines()[-1].startswith("Next (Acme Support): remove the password or key from the bot's text in "
-                                           "the Grok app; this clears by itself")
+    # the sample has no Grok app behind it: its own command is the next step, never "the Grok app"
+    assert out.splitlines()[-1].startswith("Next (Acme Support): the sample holds its fake password back until "
+                                           "the sample bot's text changes: hermes twin demo grok-edit")
+    assert "Grok app" not in out
     no_jargon(out)
 
 
@@ -272,7 +275,8 @@ def test_send_keep_and_move_wording(svc):
     rc, out, _ = run(["skip", "skill:fun-fact", "--undo"])
     assert rc == 0 and "offered for Grok again" in out
     rc, out, _ = run(["approve", "skill:fun-fact"])
-    assert rc == 0 and out.splitlines()[0] == "Approved fun-fact. It goes to Grok at the next send."
+    assert rc == 0 and out.splitlines()[0] == ("Approved fun-fact. It goes to Grok at the next send: "
+                                                "hermes twin send-to-grok.")
     assert "(to remote)" not in out
     rc, out, _ = run(["send-to-grok"])
     assert rc == 0 and out.startswith("Sent 1 skill")

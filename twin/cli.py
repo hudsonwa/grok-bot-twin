@@ -14,8 +14,8 @@ from typing import Any, Callable, Optional
 from . import bgagent, safe
 from . import osflags as _osflags
 from .engine import EngineError
-from .model import (SAMPLE_PROFILE, SETUP_ORDER, STATE_LABELS, ago, item_kind, item_name, open_conflicts, plural,
-                    status_sentence, valid_id, valid_item_id)
+from .model import (SAMPLE_PROFILE, STATE_LABELS, ago, item_kind, item_name, open_conflicts, plural, status_sentence,
+                    valid_id, valid_item_id, view)
 
 DOT = {"in_step": "●", "changes_waiting": "◐", "needs_you": "!", "grok_missing": "?", "error": "×"}
 PAGE = "the Twins page in Hermes Desktop"
@@ -127,6 +127,7 @@ class _NoTwin(Exception):
 
 
 NO_TWINS = f"No twins yet. {CONNECT}, or run hermes twin add. To look around first: hermes twin demo"
+TO_REAL_BOTS = f"to twin your real Grok bots, open {PAGE} and press Connect my Grok bots, or run hermes twin "
 NOT_NEEDED = "Not needed here"  # how a doctor line starts its "fix" when there is nothing to do on this computer
 # the first look on a computer that has no Grok app: its twins come from the computer that has
 NO_GROK_HERE = ("Grok Bot Twin: the Grok app is not on this computer. Next: link it to the computer with your Grok "
@@ -248,61 +249,15 @@ def _pair_line(p: dict) -> str:
             f"{label}{tail}{moved} · checked {ago(p.get('last_sync_at'))}")
 
 
-def _open_matters(p: dict) -> tuple:
-    """(what needs the owner, what only waits to be sent to Grok) for one twin, counted as the Twins page counts
-    them (`mattersOf` in desktop/plugin.js): a twin whose only open thing is a change to send is not an alarm."""
-    alarms = sends = 0
-    grok = p.get("grok") if isinstance(p.get("grok"), dict) else {}
-    if p.get("state") == "error":
-        alarms += 1
-    if p.get("state") == "grok_missing" or grok.get("present") is False:
-        alarms += 1
-    try:
-        if int(p.get("conflicts") or 0) > 0:
-            alarms += 1
-    except (TypeError, ValueError):
-        pass
-    alarms += len(open_conflicts(p))
-    for w in (p.get("waiting") if isinstance(p.get("waiting"), list) else [])[:30]:
-        if isinstance(w, dict) and w.get("item"):
-            if w.get("to") == "grok":
-                sends += 1
-            else:
-                alarms += 1
-    pending = p.get("pending") if isinstance(p.get("pending"), dict) else {}
-    to_grok = pending.get("to_grok")
-    if isinstance(to_grok, int) and not isinstance(to_grok, bool) and to_grok > 0:
-        sends += 1
-    held = p.get("secrets_withheld") if isinstance(p.get("secrets_withheld"), list) else []
-    places = {str(w.get("item") or w.get("kind") or "description") for w in held[:20] if isinstance(w, dict)}
-    try:
-        counted = int(p.get("secrets_held") or 0) > 0
-    except (TypeError, ValueError):
-        counted = False
-    alarms += len(places) or (1 if counted else 0)
-    return alarms, sends
-
-
-def _to_finish(p: dict) -> bool:
-    """Is this twin still being set up (its instructions or its model are left)? The sample that shows both of
-    its sides is there to be watched: its chores are not counted (as in `status_sentence`)."""
-    grok = p.get("grok") if isinstance(p.get("grok"), dict) else {}
-    hermes = p.get("hermes") if isinstance(p.get("hermes"), dict) else {}
-    if _is_sample(p) and isinstance(grok.get("description"), str) and isinstance(hermes.get("description"), str):
-        return False
-    todo = p.get("setup_left") if isinstance(p.get("setup_left"), list) else []
-    return any(k in todo for k in SETUP_ORDER)
-
-
 def _header(pairs: list) -> str:
     """"2 twins, 1 to finish setting up." : the page's header sentence (`summarize` in desktop/plugin.js), with
     every kind of open thing counted, so the terminal and the page tell one story."""
     real = [p for p in pairs if not _is_sample(p)]
     what = plural(len(pairs), "twin") if real else plural(len(pairs), "sample twin")
-    counted = [_open_matters(p) for p in pairs]
-    attention = sum(1 for alarms, _sends in counted if alarms)
-    sending = sum(1 for alarms, sends in counted if sends and not alarms)
-    finishing = sum(1 for p in pairs if _to_finish(p))
+    seen = [view(p) for p in pairs]  # (twin/model.py: the one place a twin's matters are counted)
+    attention = sum(1 for v in seen if v["needs"] == "you")
+    sending = sum(1 for v in seen if v["needs"] == "send")
+    finishing = sum(1 for v in seen if not v["ready"])
     parts = []
     if attention:
         parts.append(f"{attention} {'needs' if attention == 1 else 'need'} your attention")
@@ -339,6 +294,9 @@ def _next_step(p: dict, many: bool, names: Optional[dict] = None) -> str:
         cmd = "instructions" if c.get("where") == "instructions" else "to-grok"
         return f"choose which version to keep: hermes twin {cmd}{target}."
     if int(p.get("secrets_held") or 0) or p.get("secrets_withheld"):
+        if _is_sample(p):  # (no Grok app behind the sample: its own command changes the bot's text)
+            return ("the sample holds its fake password back until the sample bot's text changes: hermes twin "
+                    "demo grok-edit, then hermes twin check (or end the sample: hermes twin demo remove).")
         return ("remove the password or key from the bot's text in the Grok app; this clears by itself at the "
                 "next check.")
     waiting = [w for w in (p.get("waiting") or []) if isinstance(w, dict) and w.get("item")]
@@ -351,6 +309,8 @@ def _next_step(p: dict, many: bool, names: Optional[dict] = None) -> str:
     if p.get("state") == "grok_missing":
         return ("this bot is not in Grok any more; its Hermes bot keeps working. Stop twinning it with "
                 f"hermes twin stop{target}, or leave it.")
+    if view(p)["needs"] == "send":  # (approved, not sent yet)
+        return f"send it to Grok on {PAGE}, or run hermes twin send-to-grok{target}."
     return f"open {PAGE}."
 
 
@@ -401,15 +361,11 @@ def cmd_status(a) -> int:
         _out(("Shared with " + plural(n, "other computer") if n else "Sharing is on; no other computer is linked"
               if brief.get("sharing") else "Sharing with your other computers is switched off")
              + " (hermes twin fleet).")
-    if attention:
-        name = attention[0]["grok"]["name"]
-        _out(f"Next ({name}): " + _next_step(attention[0], many, names))
-    elif not real and not ready:
-        _out(f"Next: to twin your real Grok bots, open {PAGE} and press Connect my Grok bots, "
-             "or run hermes twin setup.")
+    first = attention or [p for p in pairs if view(p)["needs"] == "send"]
+    if first:
+        _out(f"Next ({first[0]['grok']['name']}): " + _next_step(first[0], many, names))
     elif not real:
-        _out(f"Next: to twin your real Grok bots, open {PAGE} and press Connect my Grok bots, "
-             "or run hermes twin add.")
+        _out(f"Next: {TO_REAL_BOTS}{'add' if ready else 'setup'}.")
     return 1 if attention else 0
 
 
@@ -989,22 +945,21 @@ def cmd_finish(a) -> int:
     pids = _batch_pids(svc, named) if named else None
     info = svc.batch_info(pids)
     twins = [t for t in info.get("twins") or [] if isinstance(t, dict) and t.get("pair_id")]
-    for t in twins:
-        if t.get("sample"):
-            if named:
-                _out(f" {_batch_name(t)}: the sample, with invented data; nothing to do.")
-    twins = [t for t in twins if not t.get("sample")]
+    samples = [_batch_name(t) for t in twins if _is_sample(t)]
+    twins = [t for t in twins if not _is_sample(t)]
+    if not twins and not samples:
+        raise _NoTwin(NO_TWINS)
+    if samples and (named or not twins):
+        _out(f" {', '.join(samples)}: the sample, with invented data; nothing to finish.")
+    if not twins:
+        _out(f"Next: {TO_REAL_BOTS}{'add' if _setup_ready(svc) else 'setup'}.")
+        return 0
     explicit = (a.model or "").strip()
     if a.all:
-        if not twins:
-            raise _NoTwin(NO_TWINS)
         twins = [t for t in twins if t.get("left") or explicit]
         if not twins:
             _out("Nothing is left: every twin has its instructions and a model.")
             return 0
-    if not twins:
-        _out("Nothing to do.")
-        return 0
     model = explicit or str(info.get("default_model") or "").strip()
     to_set = [t for t in twins if explicit or "model" in (t.get("left") or [])]
     if to_set and not model:
@@ -1305,10 +1260,11 @@ def cmd_approve(a) -> int:
     svc = _svc()
     pid = _one(svc, pair)
     res = svc.approve(pid, item)
+    target = f" {_call(_names(svc), pid)}" if pair else ""
     for x in res["approved"]:
         what = _item_words(x["item"])
-        _out(f"Approved {what}. " + ("It goes to Grok at the next send." if x.get("to") != "local"
-                                     else "It is in the twin now."))
+        _out(f"Approved {what}. " + (f"It goes to Grok at the next send: hermes twin send-to-grok{target}."
+                                     if x.get("to") != "local" else "It is in the twin now."))
     s = res.get("sync")
     if s:
         _out(f" {_names(svc).get(s['pair_id'], s['pair_id'])}: {STATE_LABELS.get(s['state'], s['state'])}")

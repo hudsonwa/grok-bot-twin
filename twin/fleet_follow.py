@@ -458,7 +458,7 @@ def sync_once(svc: Any, wait_s: int = 0, holder: Optional[list] = None) -> str:
                 now_ln = st.get("link")
                 if not now_ln or now_ln.get("pass") != ln.get("pass"):
                     return "not_linked"  # this machine unlinked itself (or was linked anew) in the meantime
-                n = fleet.drop_link(st, "source")
+                n = fleet.drop_link(st, "source")  # (a routine not seen paused: stays linked, asked again next time)
                 fleet.save(st)
             svc.emit("fleet", None, {"what": "unlinked", "count": n})
             return "unlinked"
@@ -550,13 +550,7 @@ def unlink(svc: Any, dry_run: bool = False) -> dict:
         return out
     with fleet.locked():  # first here, so that the source's answer to the waiting request finds nothing to do
         st = fleet.load()
-        if st.get("link"):
-            from . import routines as _routines
-            if not _routines.link_dropped(st):
-                # a routine this computer runs for the others could not be seen paused (Hermes holds its job
-                # file right now): it stays linked, because the goodbye would let that routine start elsewhere
-                raise _routines.RoutinesError("busy")
-        n = fleet.drop_link(st, "this") if st.get("link") else 0
+        n = fleet.drop_link(st, "this") if st.get("link") else 0  # (raises, unchanged, if a routine cannot be paused)
         fleet.save(st)
     _abort()
     if not say_goodbye(ln):

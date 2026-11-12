@@ -1,7 +1,7 @@
 """What copies over: one table (twin/copies.py), and every place that repeats it says the same.
 
-The README and the page hold written copies of the table; the manifest, the disclosure and a few README
-sentences say parts of it in prose. These tests fail when one of them drifts, and when work that a row waits
+The README and the page hold written copies of the table; the disclosure and a few README sentences say
+parts of it in prose. These tests fail when one of them drifts, and when work that a row waits
 for is merged they name the sentences that have to change.
 """
 from __future__ import annotations
@@ -18,7 +18,6 @@ from hermes_plugins.grok_bot_twin.twin import copies
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 PAGE = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
 DISCLOSURE = (ROOT / "docs" / "DISCLOSURE.md").read_text(encoding="utf-8")
-MANIFEST = " ".join((ROOT / "plugin.yaml").read_text(encoding="utf-8").split())
 
 LANES = ("xs-export", "xs-skills", "xs-routines", "xs-memory", "xs-config")
 FLEET = ("xs-skills", "xs-routines", "xs-memory", "xs-config")
@@ -99,7 +98,6 @@ def test_grok_memory_and_the_grok_model_setting_do_not_copy_and_say_why_in_one_s
         assert "Grok memory" in flat and "Grok model setting" in flat, name
         assert "memory is the most private thing a bot holds" in flat, name
         assert "nothing Hermes reads from Grok names the bot's model" in flat, name
-    assert "a bot's Grok memory and Grok model setting are not copied" in MANIFEST
 
 
 @pytest.mark.parametrize("lane", LANES)
@@ -225,7 +223,8 @@ def test_the_terminal_and_the_chat_tool_say_what_the_table_says(capsys):
     tools_src = (ROOT / "twin" / "tools.py").read_text(encoding="utf-8")
     assert '"never_copied_from_grok": copies.never()' in tools_src
     assert '"Grok memory", "Grok model setting"' in _flat(DISCLOSURE)
-    assert "`hermes twin copies`" in README and "`hermes twin copies`" in DISCLOSURE and "`copies`, `checklist`" in README
+    assert "`hermes twin copies`" in README and "`hermes twin copies`" in DISCLOSURE
+    assert "`copies`, `checklist`" in (ROOT / "docs" / "TERMINAL.md").read_text(encoding="utf-8")
 
 
 def test_the_backend_never_says_instructions_copy_from_grok_or_that_a_routine_copy_arrives_when_none_does():

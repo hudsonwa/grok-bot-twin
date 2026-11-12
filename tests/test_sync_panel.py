@@ -47,6 +47,7 @@ def bp(home, tmp_path):  # noqa: F811
     s.trust_botport(True)
     s.invalidate()
     s.status(fresh=True)
+    s.save_status()  # (the timer's tick takes in a twin made outside the plugin)
     return s
 
 

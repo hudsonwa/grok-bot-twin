@@ -128,11 +128,10 @@ def test_a_description_changed_in_hermes_is_handed_out_and_noted_as_pasted(twin,
     assert not [b for b in p["by_hand"] if b.get("item") == "persona.description"]
     assert json.loads((central(home) / "copied.json").read_text()) == {
         "acme-support": {"persona.description": hs.text_digest("Answers questions about Acme widgets.")}}
-    # the description changes in Hermes later: it asks again and the note is forgotten
+    # the description changes in Hermes later: it asks again
     soul.write_text(plain.replace("Acme widgets.", "Acme gadgets."), encoding="utf-8")
     p = _pair(svc)
-    assert p["pending"]["to_grok_items"] == ["persona.description"]
-    assert not json.loads((central(home) / "copied.json").read_text())
+    assert p["pending"]["to_grok_items"] == ["persona.description"]  # (the note no longer matches)
     assert svc.skill_text("acme-support", "description")["text"] == "Answers questions about Acme gadgets."
 
 

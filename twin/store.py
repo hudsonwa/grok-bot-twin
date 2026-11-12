@@ -402,17 +402,24 @@ def remove_tree(base: Path, path: Path) -> None:
 
 
 _depth = 0
+_owner: Optional[int] = None  # the thread inside locked(), else None
 
 
 # THE LOCK ORDER (one for the whole plugin): a module's own lock, if any, is taken BEFORE locked(), never while holding
-# it (else two threads can wait on each other forever); only a memory-only lock that calls nothing may be taken inside.
+# it (else two threads can wait on each other forever; not_inside() checks it); only a memory-only lock that calls
+# nothing may be taken inside.
 # Never wait on another program under locked(): a `hermes cron` call runs outside it, and the state is read again after.
+def not_inside(what: str) -> None:
+    if _owner == threading.get_ident():
+        raise RuntimeError(f"lock order: {what} is taken before store.locked(), never inside it")
+
+
 @contextlib.contextmanager
 def locked() -> Iterator[None]:
     """Serialise writers: re-entrant thread lock + file lock (CLI, gateway, dashboard and the background
     follower can overlap). The file lock is taken once per outermost holder: flock on macOS/Linux, a one-byte
     region lock on Windows (osflags.lock_file)."""
-    global _depth
+    global _depth, _owner
     with _LOCK:
         fd = None
         try:
@@ -429,9 +436,11 @@ def locked() -> Iterator[None]:
                     fd = None
                     raise
             _depth += 1
+            _owner = threading.get_ident()
             yield
         finally:
             _depth = max(0, _depth - 1)
+            _owner = _owner if _depth else None
             if fd is not None:
                 with contextlib.suppress(OSError):
                     _osflags.unlock_file(fd)

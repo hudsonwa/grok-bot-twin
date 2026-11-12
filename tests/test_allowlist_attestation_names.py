@@ -103,6 +103,7 @@ def test_unknown_botport_fields_never_leave_the_service(rig, home, tmp_path, mon
         r = c.post(P + path, json=body)
         assert r.status_code == 200, (path, r.text)
         texts.append(r.text)
+    service.get_service().save_status()  # (the timer's tick writes it)
     texts.append((central(home) / "status-cache.json").read_text())
     texts.append((central(home) / "events.jsonl").read_text())
     texts.append((central(home) / "pairs.json").read_text())
@@ -135,7 +136,7 @@ def test_normalize_pair_is_an_allowlist():
     assert set(p) == {"pair_id", "demo", "sample", "grok", "hermes", "pending", "conflicts", "mirror_bot", "coverage",
                       "by_hand", "restore_points", "secrets_withheld_total", "last_sync_at", "last_change_at",
                       "waiting", "secrets_withheld", "secrets_held", "parity", "error", "state", "state_reason",
-                      "switched", "skipped", "setup_left", "routines", "checked_at"}
+                      "switched", "skipped", "setup_left", "routines", "checked_at", "sentence", "tone", "needs", "ready"}
     # both sides of the twin, what is left and the routine counts are rebuilt from known keys as well
     assert set(p["grok"]) == {"id", "name", "present", "description"}
     assert set(p["hermes"]) == {"profile", "name", "description", "model_from"}

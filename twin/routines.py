@@ -85,6 +85,8 @@ MESSAGES = {
     "older_source": ("{name} has an older Grok Bot Twin, so routines do not copy yet.",
                      "Update Grok Bot Twin on {name}: Capabilities → Plugins → Update. Routines then follow by themselves."),
     "busy": ("Hermes is working on this bot's routines right now.", "Try again in a moment."),
+    "unlink_held": ("This computer stays linked for now: a routine it runs could not be paused, and unlinking "
+                    "would let it run on two computers.", "Try again in a moment."),
     "ask_there": ("From this computer a routine can be run here, or back on the computer with the Grok app.",
                   "To run it on {name}, say so on {name} or on the computer with the Grok app."),
 }
@@ -1060,7 +1062,8 @@ def link_dropped(st: dict) -> bool:
     or left behind as ordinary ones, and none may go on running by itself), "routines may run on this computer"
     is off again (a later link starts with it off, as a first one does), and what was known of the list is
     forgotten. True only when every copy was SEEN paused in its file: the goodbye that follows lets what this
-    computer ran start elsewhere. Called with the fleet lock held, before the twins are taken away."""
+    computer ran start elsewhere. False: nothing is forgotten (the link must stay, see `fleet.drop_link`). Called
+    with the fleet lock held, before the twins are taken away."""
     stopped = True
     try:
         R = load()
@@ -1085,7 +1088,7 @@ def link_dropped(st: dict) -> bool:
             after = rj.load(home)
             if after is None or any(copy(j) and rj.runnable(j) for j in after):
                 stopped = False
-        if not R.get("unreadable") and (R["dst"] is not None or R["can_run"]):
+        if stopped and not R.get("unreadable") and (R["dst"] is not None or R["can_run"]):
             R["dst"] = None
             R["can_run"] = False
             save(R)

@@ -3,7 +3,7 @@
   "label": "Grok Bot Twin",
   "description": "Backend for the Twins page in Hermes Desktop (no web dashboard tab).",
   "icon": "Copy",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "api": "plugin_api.py",
   "tab": { "path": "/grok-bot-twin", "hidden": true }
 }

@@ -11,6 +11,7 @@
 
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -181,7 +182,7 @@ const testable = source
   // Harness-only: every open confirmation is recorded with its props (its labels and what confirming does).
   .replace('function Confirm({ open,', 'function Confirm(__p) { if (__p.open) globalThis.__h.confirms.push(__p); return __Confirm(__p) }\nfunction __Confirm({ open,')
   // Harness-only: expose inner components of the temp copy for direct renders.
-  .concat('\nexport const __parts = { BatchSheet, mergeBatch, batchLines, needWords, ImportSheet, exportOf, leftOutWords, exportTextOf, AddFlow, ConnectStep, DetailsSheet, CopiesPanel, VersionsPanel, RecentPanel, FinishSheet, MoveSheet, TwinRow, StatusChip, TwinsPage, SkillSyncSheet, ShareSection, LinkSheet, LinkCode, FollowerView, FollowerRow, UnlinkDialog, UnlinkComputerDialog, RenameSheet, KeptBots, unlinkedHere, ComputerRow, Welcome, fleetOf, alsoOn, copiesDetail, codeChars, codeShown, codeLife, sinceWords, whenText, linkProblem, shareProblem, followerSummary, followerTrouble, briefSummary, unlinkedSentence, computerSentence, knownComputers, StopTwinningDialog, UninstallDialog, RemovedScreen, ElsewhereNow, WaitingBox, UnsentBox, ConflictItem, ConflictBox, SampleBanner, PrivacySheet, PreviewItem, VersionRow, previewLines, cronText, markDifferences, profileClash, reconcileConflictToasts, statusSentence, mattersOf, summarize, removedLines, followProblem, canMove, leftOf, checkedIso, differsBecause, goHome, SeeTwinSheet, SkillByHand, endSample, StoppedLine, awayFromHome, transportError, twinProfilesOf, homeOf, stepOutOfTwin, inSync, latestOf, onlyChanged, updateHint, RequestsSection, RequestsWaiting, BackendOff, Unreachable, InlineProblem, summarize, statusSentence, MissingBox, ErrorBox, hasMainAction, byHandWords, plainTrust, hereProblem, TwinError, rowTone, matchWords, blockedSentence, lineWords, whoWords, wasAsked, askedKey, attentionReason, handed , statusEvery, onAll, placeOf, WHERE_NEWS, plainActivity }\n')
+  .concat('\nexport const __parts = { BatchSheet, mergeBatch, batchLines, needWords, ImportSheet, exportOf, leftOutWords, exportTextOf, AddFlow, ConnectStep, DetailsSheet, CopiesPanel, VersionsPanel, RecentPanel, FinishSheet, MoveSheet, TwinRow, StatusChip, TwinsPage, SkillSyncSheet, ShareSection, LinkSheet, LinkCode, FollowerView, FollowerRow, UnlinkDialog, UnlinkComputerDialog, RenameSheet, KeptBots, unlinkedHere, ComputerRow, Welcome, fleetOf, alsoOn, copiesDetail, codeChars, codeShown, codeLife, sinceWords, whenText, linkProblem, shareProblem, followerSummary, followerTrouble, briefSummary, unlinkedSentence, computerSentence, knownComputers, StopTwinningDialog, UninstallDialog, RemovedScreen, ElsewhereNow, WaitingBox, UnsentBox, ConflictItem, ConflictBox, conflictsOf, SampleBanner, PrivacySheet, PreviewItem, VersionRow, previewLines, cronText, markDifferences, profileClash, reconcileConflictToasts, statusSentence, mattersOf, summarize, removedLines, followProblem, canMove, leftOf, checkedIso, differsBecause, goHome, SeeTwinSheet, SkillByHand, endSample, StoppedLine, awayFromHome, transportError, twinProfilesOf, homeOf, stepOutOfTwin, inSync, latestOf, onlyChanged, updateHint, RequestsSection, RequestsWaiting, BackendOff, Unreachable, InlineProblem, summarize, statusSentence, MissingBox, ErrorBox, hasMainAction, byHandWords, plainTrust, hereProblem, TwinError, rowTone, matchWords, blockedSentence, lineWords, whoWords, wasAsked, askedKey, attentionReason, handed , statusEvery, onAll, placeOf, WHERE_NEWS, plainActivity }\n')
   // Harness-only: the page counts itself as "on screen" in an effect, which a static render never runs.
   .concat('export const __hooks = { setPageOpen: n => { pageOpen = n }, clearPageToasts, setPageTitle: n => { pageTitle = n }, landFocus, lessMotion }\n')
 writeFileSync(join(work, 'plugin.mjs'), testable)
@@ -499,6 +500,20 @@ const H = (globalThis.__h = {
   }
 })
 
+// The server says each twin's sentence and shape (twin/model.py `view`: the page only shows them). A fixture is
+// served the way /status sends it: those fields are filled in by the real Python code, never typed here.
+const viewCache = new Map()
+const VIEW_PY = 'import json,sys; sys.path.insert(0, sys.argv[1]); from twin.model import view; print(json.dumps([view(p) for p in json.load(sys.stdin)]))'
+const served = pair => {
+  if (!pair || typeof pair !== 'object') return pair
+  const { sentence, tone, needs, ready, ...bare } = pair
+  const key = JSON.stringify(bare)
+  if (!viewCache.has(key)) viewCache.set(key, JSON.parse(execFileSync('python3', ['-I', '-c', VIEW_PY, resolve(here, '..', '..')], { input: `[${key}]` }))[0])
+  return { ...pair, ...viewCache.get(key) }
+}
+let statusNow = null
+Object.defineProperty(H, 'status', { get: () => statusNow, set: v => { statusNow = Array.isArray(v?.pairs) ? { ...v, pairs: v.pairs.map(served) } : v } })
+
 const contributions = []
 const listeners = {}
 const intervals = []
@@ -743,6 +758,8 @@ if (!haveReact) {
   const { renderToStaticMarkup } = req('react-dom/server')
   const { jsx } = req('react/jsx-runtime')
   const P = mod.__parts
+  // (fixtures handed to the page's parts directly are served too)
+  for (const [name, wrap] of Object.entries({ statusSentence: f => (p, o) => f(served(p), o), rowTone: f => (p, o) => f(served(p), o), attentionReason: f => (e, p) => f(e, served(p)), summarize: f => (ps, o) => f(ps.map(served), o), TwinRow: f => props => f({ ...props, pair: served(props.pair) }) })) P[name] = wrap(P[name])
   const text = html => html.replace(/<style[^>]*>[^<]*<\/style>/g, ' ').replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/\s+/g, ' ')
   // Every surface that is rendered is kept, for the vocabulary sweep at the end. `terminal` marks the few
   // renders where a "use the terminal instead" fold was opened on purpose.
@@ -1949,6 +1966,29 @@ if (!haveReact) {
   await tick()
   ok(H.restCalls.at(-1)?.path === '/pairs/acme-support/restore' && H.restCalls.at(-1)?.opts?.body?.point_id === 'skill:greet-visitors@aaaaaaaaaaaa' && H.notes.at(-1)?.message === 'Put back the Hermes version of the skill "greet-visitors"', 'Undo puts the Hermes version back')
 
+  // R2: the instructions sync's and Hermes -> Grok's open choices are the one "changed in both places" matter
+  // (no kind without a box), and the box settles each by its own route.
+  {
+    const open = [{ where: 'instructions', item: 'instructions' }, { where: 'to_grok', item: 'name' }]
+    const both = { ...acme, conflicts: 0, open_conflicts: open, secrets_held: 0, secrets_withheld: [] }
+    const ms = P.mattersOf(both)
+    ok(JSON.stringify(ms.map(m => m.kind)) === '["conflict"]' && ms[0].title === '2 things changed in both places' && P.hasMainAction(ms[0], both) && P.blockedSentence(both, null) === 'First choose which version to keep.', `R2: open choices are one conflict matter with a button, and they block a move (${JSON.stringify(ms)})`)
+    reset()
+    const card = { at: iso(5), grok: 'Grok words', hermes: 'Hermes words', grok_digest: 'd'.repeat(64) }
+    H.restReply = async path => (path.endsWith('/instructions-sync') ? { conflict: card } : { state: 'applied', restore_point: 'own@bbbbbbbbbbbb' })
+    const got = (await P.conflictsOf(both)).conflicts
+    ok(JSON.stringify(H.restCalls.map(c => c.path)) === '["/pairs/acme-support/instructions-sync"]' && got.length === 2 && got[0].hermes.text === 'Hermes words' && got[1].toGrok === true && got[1].kind === 'name', `R2: the box reads the instructions card (and not botport's list when it has none) (${JSON.stringify(H.restCalls)})`)
+    reset()
+    render(jsx(P.ConflictItem, { conflict: got[0], pairId: 'acme-support' }))
+    await press('Keep the Grok version')
+    ok(H.restCalls[0]?.path === '/pairs/acme-support/instructions-sync/resolve' && JSON.stringify(H.restCalls[0]?.opts?.body) === JSON.stringify({ choice: 'grok', grok_digest: card.grok_digest }) && H.notes.at(-1)?.message === 'Kept the Grok version of the instructions' && H.notes.at(-1)?.action?.label === 'Undo', `R2: keeping a version of the instructions uses the instructions sync's own route (${JSON.stringify(H.restCalls)})`)
+    const toGrok = []
+    html = text(render(jsx(P.ConflictItem, { conflict: got[1], lead: true, onToGrok: () => toGrok.push(1), pairId: 'acme-support' })))
+    await press('Changes to Grok…')
+    ok(html.includes('The name changed in both places.') && toGrok.length === 1 && !html.includes('Keep the Hermes version'), 'R2: a choice held by Hermes -> Grok opens its sheet, where both versions are chosen between')
+    ok(!/el\('span', \{ key: m\.id \}\)/.test(source) && !/kind: 'choose'/.test(source), 'R2: no matter falls through to an empty box')
+  }
+
   // ── Details: one sheet, three sections, ends in Done ──
   const details = (pair, props = {}) => render(jsx(P.DetailsSheet, { intervalS: 60, onClose: noop, onSkillSync: noop, open: true, pair, ...props }))
   {
@@ -2052,9 +2092,8 @@ if (!haveReact) {
     // (the first sentence is the state; the second, the reason, is the hover text: the sheet stays within its words)
     ok(html.includes('Routine "Morning summary" · not in Hermes yet') && !html.includes('Grok keeps routine schedules') && raw.includes('title="not in Hermes yet. Grok keeps routine schedules in its cloud, so you set this one up yourself."') && html.includes('Routine "Evening summary" · Grok keeps it'), `details: the backend's reason reads on from the part's name (lower case, unless it starts with a name): ${html}`)
     H.override = {}
-    // A twin whose list the backend did not send still shows the product's fixed table, not an excuse.
-    html = text(details(legacy))
-    ok(html.includes('Copies by itself: name and description') && html.includes('You bring these over yourself: instructions, routines and connections') && !/does not have the list/.test(html), 'details (older backend): the fixed table, no dead end')
+    // The table is the server's (twin/model.py sends DEFAULT_COVERAGE with every twin): the page keeps no copy.
+    ok(!/DEFAULT_COVERAGE|COVERAGE_ALIAS/.test(source) && !/does not have the list/.test(text(details(legacy))), 'details: the page has no coverage table of its own (R7)')
     ok(P.differsBecause({ id: 'model', action: 'choose_model' }, legacy, new Set()).action === null, 'details (older backend): no button that could not work')
     // Skill sync on: said, and no set-up button.
     html = text(details({ ...recipe, mirror_bot: { connected: true } }))

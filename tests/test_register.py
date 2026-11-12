@@ -42,7 +42,7 @@ def manifest():
 def test_manifest_basics():
     m = manifest()
     assert m["name"] == "grok-bot-twin"
-    assert m["version"] == "0.3.4" and isinstance(m["version"], str)
+    assert m["version"] == "0.3.5" and isinstance(m["version"], str)
     assert m["license"] == "MIT"
     schema = m["config_schema"]
     assert schema["sync_interval_seconds"]["default"] == 60 and schema["sync_interval_seconds"]["min"] == 5

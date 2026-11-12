@@ -13,7 +13,7 @@ SCHEMA = "botport.twin.v1"
 STATES = ("in_step", "changes_waiting", "needs_you", "grok_missing", "error")
 STATE_LABELS = {
     "in_step": "Up to date",
-    "changes_waiting": "Updating",
+    "changes_waiting": "Updating…",
     "needs_you": "Needs your attention",
     "grok_missing": "Not in Grok any more",
     "error": "Can't check right now",
@@ -136,74 +136,83 @@ def item_name(item: str) -> str:
 
 
 FOLLOWS = "Follows Grok"
-SETUP_ORDER = ("instructions", "model")
 
 
 def _count(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
-def status_sentence(p: dict) -> str:
-    """The one status sentence of a twin, in the Twins page's own words (desktop/plugin.js `statusSentence`), so
-    the terminal and a chat say what the page says: "Follows Grok · ready", "1 change to send to Grok · 2 things
-    left", "Almost ready · 1 thing left", "Changed in both places"."""
+TONES = ("good", "busy", "todo", "send", "warn", "muted", "bad")
+
+
+def view(p: dict) -> dict:
+    """The one status sentence of a twin and the shape shown beside it (`tone`), from its counters. The Twins page
+    shows these two fields as the server sends them, and the terminal and a chat say the same words:
+    "Follows Grok · ready", "1 change to send to Grok · 2 things left", "Almost ready · 1 thing left",
+    "Changed in both places". Tones: trouble "bad"/"warn", gone "muted", something to send "send", a to-do
+    "todo", on its way "busy", calm "good". `needs`: what its open matters ask of the owner ("you", or only
+    "send" to Grok; None: nothing). `ready`: no set-up chore is left (instructions, model)."""
     grok = p.get("grok") if isinstance(p.get("grok"), dict) else {}
     hermes = p.get("hermes") if isinstance(p.get("hermes"), dict) else {}
     sample = bool(p.get("sample") or p.get("demo"))
     # (the sample that shows both of its sides is there to be watched: its set-up chores are not counted)
     shown = sample and isinstance(grok.get("description"), str) and isinstance(hermes.get("description"), str)
     todo = p.get("setup_left") if isinstance(p.get("setup_left"), list) else []
-    left = [] if shown else [k for k in SETUP_ORDER if k in todo]
+    left = [] if shown else [k for k in SETUP_STEPS if k in todo]
     left_text = f"{plural(len(left), 'thing')} left" if left else ""
 
-    def and_left(text: str) -> str:
-        return f"{text} · {left_text}" if left_text else text
+    def said(sentence: str, tone: str, needs: Optional[str] = None) -> dict:
+        return {"sentence": sentence, "tone": tone, "needs": needs, "ready": not left}
 
     if p.get("state") == "error":
-        return STATE_LABELS["error"]
+        return said(STATE_LABELS["error"], "bad", "you")
     if p.get("state") == "grok_missing" or grok.get("present") is False:
-        return STATE_LABELS["grok_missing"]
+        return said(STATE_LABELS["grok_missing"], "muted", "you")
     pending = p.get("pending") if isinstance(p.get("pending"), dict) else {}
-    matters: list = []  # (only asks "send this to Grok?", short sentence, how many)
-    conflicts = _count(p.get("conflicts"))
+    matters: list = []  # (only asks "send this to Grok?", is a change waiting for a go-ahead, short sentence, how many)
+    conflicts = _count(p.get("conflicts")) + len(open_conflicts(p))  # (one matter: one "changed in both places" box)
     if conflicts:
-        matters.append((False, "Changed in both places" if conflicts == 1
+        matters.append((False, False, "Changed in both places" if conflicts == 1
                         else f"{conflicts} things changed in both places", 1))
-    matters += [(False, "Changed in both places", 1) for _ in open_conflicts(p)]
     for w in (p.get("waiting") if isinstance(p.get("waiting"), list) else [])[:30]:
         if not isinstance(w, dict) or not w.get("item"):
             continue
-        kind = item_kind(str(w["item"]))
+        kind = item_kind(str(w["item"]).split("@")[0])
         kind = "connection" if kind == "connector" else kind
         if w.get("to") == "grok":
-            matters.append((True, "1 change to send to Grok", 1))
+            matters.append((True, True, "1 change to send to Grok", 1))
         else:
-            matters.append((False, f"A {kind} from Grok is ready" if w.get("to") == "hermes"
+            matters.append((False, True, f"A {kind} from Grok is ready" if w.get("to") == "hermes"
                             else "Something is waiting for your go-ahead", 1))
     to_grok = _count(pending.get("to_grok"))
     if to_grok:
-        matters.append((True, f"{plural(to_grok, 'change')} to send to Grok", to_grok))
+        matters.append((True, False, f"{plural(to_grok, 'change')} to send to Grok", to_grok))
     held = p.get("secrets_withheld") if isinstance(p.get("secrets_withheld"), list) else []
     places = {str((w.get("item") or w.get("kind") or "description")) for w in held[:20] if isinstance(w, dict)}
     for _place in sorted(places) or ([""] if _count(p.get("secrets_held")) else []):
-        matters.append((False, "A password or key was not copied", 1))
-    if len(matters) > 1:
-        if all(m[0] for m in matters):
-            return and_left(f"{plural(sum(m[2] for m in matters), 'change')} to send to Grok")
-        return and_left(f"{len(matters)} things need you")
+        matters.append((False, False, "A password or key was not copied", 1))
     if matters:
-        return and_left(matters[0][1])
+        sends = all(m[0] for m in matters)
+        text = matters[0][2] if len(matters) == 1 else (
+            f"{plural(sum(m[3] for m in matters), 'change')} to send to Grok" if sends
+            else f"{len(matters)} things need you")
+        return said(f"{text} · {left_text}" if left_text else text,
+                    "send" if sends else "todo" if all(m[1] for m in matters) else "warn", "send" if sends else "you")
     if _count(pending.get("to_hermes")):
-        return "Updating…"
+        return said(STATE_LABELS["changes_waiting"], "busy")
     if _count(pending.get("in_flight")):
-        return f"{plural(_count(pending.get('in_flight')), 'change')} on the way to Grok"
+        return said(f"{plural(_count(pending.get('in_flight')), 'change')} on the way to Grok", "busy")
     if left:
-        return f"Almost ready · {left_text}"
+        return said(f"Almost ready · {left_text}", "todo")
     sw = p.get("switched") if isinstance(p.get("switched"), dict) else None
-    if sw and sw.get("at"):
-        n = _count(sw.get("routines_on"))
-        return f"{FOLLOWS} · {plural(n, 'routine')} {'runs' if n == 1 else 'run'} in Hermes" if n else FOLLOWS
-    return FOLLOWS if sample else f"{FOLLOWS} · ready"
+    n = _count(sw.get("routines_on")) if sw and sw.get("at") else 0
+    sentence = (f"{FOLLOWS} · {plural(n, 'routine')} {'runs' if n == 1 else 'run'} in Hermes" if n
+                else FOLLOWS if sample or (sw and sw.get("at")) else f"{FOLLOWS} · ready")
+    return said(sentence, "good")
+
+
+def status_sentence(p: dict) -> str:
+    return view(p)["sentence"]
 
 
 def open_conflicts(pair: dict) -> list:
@@ -214,8 +223,11 @@ def open_conflicts(pair: dict) -> list:
 
 
 def derive_state(pair: dict) -> tuple[str, str]:
-    """State + short reason from a pair status dict (used when an engine omits them). The reason names every
-    open matter in plain words, joined with "; " (never one of several). Any open conflict means "needs_you"."""
+    """State + short reason from a pair's counters (the only source of a state other than "error": an engine's
+    own state is not trusted over them). The reason names every open matter in plain words, joined with "; "
+    (never one of several). Any open conflict means "needs_you". Every caller re-derives after it changes the
+    counters, so the pair's `sentence` and `tone` (`view`) are refreshed here too, never computed anywhere else."""
+    pair.update(view({**pair, "state": None}))
     if pair.get("grok", {}).get("present") is False:
         return "grok_missing", "This bot is not in the Grok app any more"
     conflicts = int(pair.get("conflicts") or 0)
@@ -435,13 +447,16 @@ def normalize_pair(raw: Any, demo: bool = False) -> Optional[dict]:
                      if isinstance(sw, dict) and isinstance(sw.get("at"), str) and parse_iso(sw["at"]) else None)
     p["skipped"] = []  # filled by the service (items the owner keeps in Hermes only)
     p["error"] = clean_error(raw.get("error"))
-    state = raw.get("state")
-    if state not in STATES:
-        p["state"], p["state_reason"] = derive_state(p)
-    else:
-        p["state"] = state
-        p["state_reason"] = safe.clean_summary(raw.get("state_reason"), 120) or (
-            derive_state(p)[1] if state != "error" else "Hermes could not check this twin")
+    # The state follows the counters (invariant: they never disagree). Only "error" (nothing could be read) and
+    # "grok_missing" (said through `present`) come from the engine as they are.
+    if raw.get("state") == "error":
+        p["state"] = "error"
+        p["state_reason"] = safe.clean_summary(raw.get("state_reason"), 120) or "Hermes could not check this twin"
+        p.update(view(p))
+        return p
+    if raw.get("state") == "grok_missing":
+        p["grok"]["present"] = False
+    p["state"], p["state_reason"] = derive_state(p)
     return p
 
 

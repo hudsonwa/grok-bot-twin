@@ -117,7 +117,8 @@ def test_account_choice_message_and_setting(rig):
 
 def test_sync_all_reports_a_failing_twin_in_place(rig, home):
     svc = rig.svc
-    svc.status(fresh=True)  # registers acme-support
+    svc.status(fresh=True)
+    svc.save_status()  # registers acme-support (the timer's tick takes in a twin made outside the plugin)
     rig.mode(sync_error_pair="recipe-planner")
     out = svc.sync(None)["pairs"]
     by = {p["pair_id"]: p for p in out}
@@ -134,6 +135,7 @@ def test_sync_all_reports_a_failing_twin_in_place(rig, home):
 def test_sync_all_keeps_demo_results_when_botport_cannot_run(rig):
     svc = rig.svc
     svc.status(fresh=True)
+    svc.save_status()  # (the timer's tick takes in a twin made outside the plugin)
     svc.demo_action("start", "demo-profile")
     rig.mode(accounts=LABELS)
     out = {p["pair_id"]: p for p in svc.sync(None)["pairs"]}

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.5 (12 November 2026)
+
+The fixes from the cycle-3 review: a possible hang, two ways a choice or a routine could slip through, and a much
+shorter README and plugin description.
+
+- Fixed a possible hang: the status read and a Hermes to Grok change could each wait for the lock the other held.
+  Hermes to Grok now reads the Grok side from the last status, and the one lock order is checked in code.
+- Reading the status no longer writes any file. The background round saves what the read learnt, and a status
+  never shows "up to date" while a choice is still being worked out.
+- An instructions or Hermes to Grok conflict is now the one "changed in both places" box on the Twins page, with
+  buttons that settle it. Before, the row could show an empty box with nothing to press.
+- A computer stays linked, with a plain sentence, while a routine it runs cannot be paused, so a routine never
+  runs on two computers.
+- One status sentence for every twin, worked out in one place: the Twins page, the terminal and `/twin` say the
+  same words, and a twin's state follows its counts of changes and choices.
+- The sample tour no longer sends you to the Grok app: after `demo secret` it names `demo grok-edit`, it ends with
+  `send-to-grok`, and `finish --all` with only the sample says so instead of "No twins yet".
+- The README says at the top that the Plugins button and the catalog name give the older 0.2.1, gives the one
+  command for this version, and states the minimum Hermes (0.22.7) before any install line.
+- The README is one screen (133 lines, was 1,289); the rest moved, once, to docs/GUIDE.md, docs/SHARING.md and
+  docs/TERMINAL.md. The plugin description that `hermes plugins list` prints is 58 words (was 2,464) and points to
+  docs/DISCLOSURE.md, now the one disclosure.
+
 ## 0.3.4 (12 November 2026)
 
 Smaller and safer: the fixes from the cycle-2 review, mostly by removing code (about 1,300 fewer product lines).

@@ -111,7 +111,8 @@ runs; otherwise it is refused with a message saying why. `hermes twin doctor` sh
   digests are remembered).
   A file whose text is not a `grok-bot-export` document is not used. What is taken from an export is the same as
   for **Import setup export** below; the text is not stored. `hermes twin import-exports DIR` reads the folder
-  you name in the same way, once.
+  you name in the same way, once. Nothing is clicked or typed in the Grok app: you paste the request into
+  each bot yourself.
 - Grok's instructions kept in step (`twin/instr_sync.py`; every 15 minutes with the background check, and when
   you press Check now or run `hermes twin instructions check`), for each twin that follows Grok's instructions
   (on unless you switch it off for that twin): the names, dates and sizes of the files in

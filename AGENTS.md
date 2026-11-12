@@ -27,9 +27,8 @@ Add `--json` to `--check` or `--plan` for a machine-readable answer.
    and tell your owner to install Hermes Agent first. Do not install or update Hermes yourself; if it offers
    an update, mention that to your owner.
 2. **Is the plugin there?** Run `hermes plugins list --plain --no-bundled` (the short list). If
-   `grok-bot-twin` is not listed, run `hermes plugins install grok-bot-twin --enable`. If it is listed but
-   off, run `hermes plugins enable grok-bot-twin`. (Until the catalog lists it, the README section "Prefer
-   the terminal?" has the install line with a pinned commit.)
+   `grok-bot-twin` is not listed, run the `next` install line at the top of README.md (the catalog name gives
+   the older 0.2.1). If it is listed but off, run `hermes plugins enable grok-bot-twin`.
    If your owner wants the code of this very checkout instead, or the computer is offline, install from the
    checkout: `hermes plugins install file://ABSOLUTE-PATH --ref COMMIT --enable`. ABSOLUTE-PATH is where this
    checkout is, so the address has three slashes in a row, like `file:///home/you/twin`. COMMIT is
@@ -166,5 +165,5 @@ normal result while your owner still has to download botport or paste instructio
   folder. Never point a test at a real Hermes folder or at the Grok app.
 - The words on the page and in the terminal are part of the product, and tests check many of them. Keep
   the vocabulary: twin, Hermes bot, the Twins page, skill sync, the sync bot, the pass, botport, link code.
-- Everything the plugin reads, writes, runs or sends is listed in [docs/DISCLOSURE.md](docs/DISCLOSURE.md)
-  and in `plugin.yaml`. A change that adds one must add it there too.
+- Everything the plugin reads, writes, runs or sends is listed in [docs/DISCLOSURE.md](docs/DISCLOSURE.md),
+  the one disclosure (`plugin.yaml` only points to it). A change that adds one must add it there too.

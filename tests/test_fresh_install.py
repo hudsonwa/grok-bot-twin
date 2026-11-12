@@ -188,20 +188,25 @@ def test_no_note_when_the_install_is_an_ordinary_one(no_grok, monkeypatch):
     assert all(c["id"] != "windows_admin_install" for c in no_grok.doctor()["checks"])
 
 
-# ---- the README says how, in one line ----------------------------------------------------------------------------
+# ---- the docs say how, in one line ------------------------------------------------------------------------------
 def test_readme_gives_the_other_computer_one_install_line_and_one_link_line():
-    text = (ROOT / "README.md").read_text(encoding="utf-8")
-    part = text.split("## Your twins on your other computers", 1)[1].split("\n## ", 1)[0]
-    part, text = " ".join(part.split()), " ".join(text.split())  # where a line breaks is not what is pinned here
-    assert "hermes plugins install grok-bot-twin --enable" in part
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    part = (ROOT / "docs" / "SHARING.md").read_text(encoding="utf-8")  # moved out of the README (R14b)
+    part = part.split("## A twin's memory on your other computers", 1)[0]
+    text = " ".join((readme + part).split())  # where a line breaks is not what is pinned here
+    part = " ".join(part.split())
+    # the other computers install with the one `next` line at the top of the README, not the catalog name (0.2.1)
+    assert "`next` install line" in part and "(../README.md)" in part and "0.2.1" in part
+    assert "hermes plugins install grok-bot-twin --enable" not in part
+    assert "On your other computers:** the same line" in " ".join(readme.split())
     assert "hermes twin link 7KQ4-M2XD-P9RA" in part
     assert "no Grok app" in part and "a scheduled task of your own account on Windows" in part
     assert "optional; Linux and macOS" not in text
     assert "hermes plugins install grok-bot-twin && hermes plugins enable grok-bot-twin" not in text
 
 
-def test_the_manifest_names_the_windows_helper():
-    text = " ".join((ROOT / "plugin.yaml").read_text(encoding="utf-8").split())
+def test_the_disclosure_names_the_windows_helper():
+    text = " ".join((ROOT / "docs" / "DISCLOSURE.md").read_text(encoding="utf-8").split())
     for word in ("schtasks.exe", "whoami.exe", "taskkill.exe", "one scheduled task of your own account"):
         assert word in text, word
 

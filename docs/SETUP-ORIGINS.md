@@ -183,7 +183,7 @@ the Grok app, because a bot saying "done" is not proof.
 
 Costs to know before trying it: every chat turn with the bot and every run of its routine spends Grok credit.
 The pass still reaches the bot as a file you attach, never as pasted text, and a copy of it then lives in that
-bot's chat (the README's "Known limitations" says the same of today's setup).
+bot's chat ([DISCLOSURE.md](DISCLOSURE.md#known-residual-the-pass-in-the-sync-bots-chat) says the same of today's setup).
 
 ## Test plan (needs the owner's OK before any step runs on the real Grok app)
 

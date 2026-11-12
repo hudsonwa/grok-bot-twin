@@ -87,5 +87,6 @@ def test_F6_derive_state_never_in_step_with_an_open_conflict():
                                       {"where": "to_grok", "item": "instructions"},
                                       {"where": "to_grok", "item": "routine:morning"}])
     assert derive_state(both) == ("needs_you", "Choose which instructions and routine to keep")
-    assert status_sentence(dict(both, state="needs_you")) == "3 things need you"
+    # (one "changed in both places" matter, as the page has it since R2)
+    assert status_sentence(dict(both, state="needs_you")) == "3 things changed in both places"
     assert instr_sync.STATES.count("conflict") == 1

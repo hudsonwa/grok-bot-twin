@@ -1089,12 +1089,15 @@ def applied_report(st: dict) -> dict:
 
 def drop_link(st: dict, by: str) -> int:
     """This machine stops following: every mirrored twin's Hermes bot is taken away (kept 30 days) and the link
-    is forgotten. Returns how many twins left. Called with the store lock held."""
+    is forgotten. Returns how many twins left. Called with the store lock held.
+    THE one place an unlink pauses routines first: a copy not SEEN paused keeps the link (RoutinesError
+    "unlink_held", nothing changed), or it could run here and, after the goodbye or a forced move, elsewhere too."""
+    from . import routines as _routines
+    if not _routines.link_dropped(st):
+        raise _routines.RoutinesError("unlink_held")
     ln = st["link"]
     n = 0
     reason = "unlinked" if by == "this" else "unlinked_by_source"
-    from . import routines as _routines
-    _routines.link_dropped(st)  # (first: no routine may go on running in a bot that is about to be moved aside)
     for tid, entry in list(ln["twins"].items()):
         if isinstance(entry, dict):
             if not _keep(st, tid, entry, reason):
