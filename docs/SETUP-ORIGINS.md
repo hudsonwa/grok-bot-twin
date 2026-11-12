@@ -5,8 +5,7 @@ invented bots: one agent that was given only `AGENTS.md`, and one that was given
 Hermes' own chat model, each took a Hermes that had never been opened to twins and a link code, stopping for
 the owner's download and the owner's yes; a Linux computer was then linked with the same command. Ways 3a
 and 3b are DESIGN ONLY. Nothing in sections 3a and 3b has been run against the real Grok app. The test plan at
-the end needs the owner's OK before any of its steps touches the Grok app. Section 3c (Hermes asks your new
-twins' bots for their setup export) is built, but has not been run against the real Grok app either.
+the end needs the owner's OK before any of its steps touches the Grok app.
 
 ## Four ways in, one command
 
@@ -186,113 +185,6 @@ Costs to know before trying it: every chat turn with the bot and every run of it
 The pass still reaches the bot as a file you attach, never as pasted text, and a copy of it then lives in that
 bot's chat (the README's "Known limitations" says the same of today's setup).
 
-## 3c. Hermes asks your new twins' bots for their setup export
-
-**Status: BUILT, NOT RUN against the real Grok app.** The plugin's half (the permission check, the hand-over
-message, the guard and the skill) is built and covered by tests with invented bots. Nothing in this section has
-been run against the real Grok app, and no Hermes chat has driven it yet.
-
-### What it is
-
-After you made several twins at once, each needs its instructions. Its Grok bot can write them in a setup
-export: you paste a fixed request into that bot's chat in Grok, send it, and save the file it answers with to
-Downloads, where the Twins page picks it up. On the sheet that follows Twin N bots there is an optional path,
-"Let Hermes do the Grok part". It hands those clicks to Hermes' own computer-use tool, in a new Hermes chat, for
-the bots you ticked. Every step that does something asks you first.
-
-### The permission check
-
-Before anything starts, the plugin looks at three things and names exactly what to switch on when one is
-missing. It reads the default profile's config.yaml (only `platform_toolsets.cli`, `agent.disabled_toolsets`,
-`approvals.mode` and `computer_use.backend`) and runs nothing.
-
-| Needed | How the plugin tells | What it asks you to switch on |
-|---|---|---|
-| The computer-use driver | Hermes' override `HERMES_CUA_DRIVER_CMD`, else the driver Hermes installed in its own tools folder (`tools/facts.json` names it), else `cua-driver` on PATH | `hermes computer-use install`; on a Mac, Accessibility and Screen Recording for the CuaDriver app (`hermes computer-use permissions grant`); check with `hermes computer-use status` |
-| The Computer Use toolset | `platform_toolsets.cli` (the list Hermes Desktop also uses) is unset, names `computer_use` or the `hermes-cli` set; and `agent.disabled_toolsets` does not name it | `hermes tools`, the CLI, tick Computer Use |
-| Approvals on | `approvals.mode` is not off, and Hermes was not started with --yolo (`HERMES_YOLO_MODE`) | Approvals back on in Hermes Desktop, or `hermes config set approvals.mode manual` |
-
-With approvals off the flow does not start: it needs Hermes to ask before each click. Smart approvals are fine:
-the question this flow forces always goes to you, never to Hermes' guardian model.
-
-### What happens
-
-1. You press "Let Hermes do the Grok part". The plugin writes one small file in its data folder,
-   `grok-part.json`: the ticked twins' ids and bot names, the SHA-256 of the request, a random flow id and an end
-   time 30 minutes later. Stop on the Twins page deletes it.
-2. The Twins page opens a new Hermes chat with one message: the steps, the rules, the bot names as a numbered
-   list marked as data (each name made plain, quotes and brackets taken out, at most 60 characters, at most 20
-   bots), and the request text between two marker lines.
-3. Hermes follows the skill `grok-bot-twin:finish-twins-in-grok`, bot by bot: look, open that bot's chat, put the
-   request in, send, wait, save the answer file to Downloads.
-4. The Twins page sees each file arrive in Downloads and imports it, as when you save the files yourself.
-
-### The guard (the plugin's `pre_tool_call` hook)
-
-While the flow is off (no file, past its end time, or a file that cannot be read) the guard does nothing at all
-and `computer_use` behaves as Hermes ships it. Any other tool is never looked at. While the flow is on, for
-`computer_use` only:
-
-| Call | The guard's answer |
-|---|---|
-| capture of the Grok app (app "Grok"), wait | Nothing: looking runs without a question, as in Hermes |
-| list_apps, list_windows, a capture of anything else | Refused (other windows' titles and pictures would reach the model) |
-| any step from another chat than the first one that used computer_use while the flow is on, a step with no chat id, any step while approvals are off | Refused |
-| any call whose `app` is not the Grok app, or that does not name it (Hermes then refuses an input step whose app is not its current target) | Refused |
-| click, scroll, focus_app (Grok only) | "approve": Hermes asks you, for this one step |
-| type or set_value of exactly the request (or one ticked bot's name, to find its chat) | "approve" |
-| type or set_value of any other text | Refused, with a sentence |
-| key: Return, Escape, Tab, Shift+Tab | "approve" |
-| any other key, paste (Cmd+V or Ctrl+V) included: the clipboard can hold anything | Refused |
-| drag, double, right or middle click, an unknown action | Refused: not a step of this flow |
-| a step from another chat than the one that started acting | Refused |
-| approvals switched off meanwhile, or --yolo | Refused: no question would come |
-
-Each "approve" carries a rule key used once, so an answer of "session" or "always" to one step does not let the
-next one through unasked. Answer Once: an "always" would leave one entry in Hermes' allowlist that never
-matches again. The guard reads the flow file at most every 2 seconds (and again only when its date or size
-changed). It never raises into Hermes: an error while the flow is on refuses the step.
-
-### Facts read from Hermes (source at commit b200f5bc60, read only)
-
-- `computer_use` is registered with `check_fn=check_computer_use_requirements` (tools/computer_use_tool.py),
-  which asks the selected backend; the built-in `cua` backend is available when the driver binary is found
-  (plugins/computer_use/cua/__init__.py:18-29). The driver is found through `HERMES_CUA_DRIVER_CMD` or Hermes'
-  own package store (tools/computer_use/cua_backend_driver.py:76-88; pm/packages.py:990-1003 for the
-  binary's place in it).
-- Actions: capture, click, double_click, right_click, middle_click, drag, scroll, type, key, set_value, wait,
-  list_apps, list_windows, focus_app (tools/computer_use/schema.py:20-35). Every one except capture, wait,
-  list_apps and list_windows asks for approval (tools/computer_use/tool.py:456-485 and 338-342).
-- The tool refuses a few key combinations and shell-like texts on its own (tools/computer_use/tool.py:41-71).
-- A `pre_tool_call` hook gets `tool_name`, `args`, `task_id`, `session_id`, `tool_call_id`, `turn_id`,
-  `api_request_id`, `middleware_trace`; "block" with a message wins over "approve"; "approve" takes a message
-  and a `rule_key` (hermes_cli/plugins.py:1907-1959). "approve" goes to `request_tool_approval`, which asks the
-  same human gate with the key `plugin_rule:<rule_key>` and fails closed when nobody can answer
-  (hermes_cli/plugins.py:1990-2016; tools/approval.py:1154-1179).
-- That gate approves without asking under --yolo or `approvals.mode: off`, and skips a key already granted for
-  the session (tools/approval.py:1020-1024); it does not use the smart guardian (tools/approval.py:1064).
-- Hermes Desktop's chats use the CLI's toolset list, `platform_toolsets.cli` (tui_gateway/agent_factory.py:418-427);
-  computer_use is in the default set and not among the toolsets that are off by default
-  (toolsets.py:11-36; hermes_cli/tools_config.py:110). A coding workspace uses the coding set, which leaves
-  computer_use out (toolsets.py:64; tui_gateway/agent_factory.py:403-407).
-- `approvals.mode` defaults to smart (hermes_cli/config_defaults.py:1663).
-- `hermes plugins validate` reports a registered hook that `provides_hooks` does not list
-  (hermes_cli/plugin_validate.py:435-455).
-
-### UNVERIFIED
-
-- That the forced question appears for every step in Hermes Desktop after an earlier "session" or "always"
-  answer. The source says it should (a new key each step); no live chat has shown it.
-- The Grok app's labels and screens, which change between versions; the skill says to stop when a screen does
-  not match.
-- Whether the Grok app saves an attached answer file straight to Downloads or opens a save window.
-- Whether a bot answers with a file or with a code block (then the owner saves it by hand).
-- The driver check is a copy of Hermes' check, not Hermes' own: a Hermes installed with its tools somewhere
-  else (a stamped runtime folder) may be told "not installed" when it is. On a Mac the driver's permissions are
-  not checked before the flow starts.
-- Pictures of the Grok window go to the chat's model provider; the list of chats at the side of the window is
-  in them. The skill opens only the listed bots' chats, but it cannot keep that list out of a picture.
-
 ## Test plan (needs the owner's OK before any step runs on the real Grok app)
 
 Nothing below has been run. T1 needs no Grok app and could run today. Every other step needs the owner's OK
@@ -382,8 +274,8 @@ After a stop the owner does clean-up T5 by hand. Nothing is retried without a ne
 
 1. Is it OK to run this test plan on the real Grok app, with "Test Scout" and "Test Sync" only?
 2. In which Grok account?
-3. Should a guard hook (`pre_tool_call`) ship in the plugin at all? It widens what the plugin registers and
-   must be disclosed, for a flow that only some owners would use.
+3. Should a guard hook (`pre_tool_call`) ship in the plugin at all? Decided: no. It widens what the plugin
+   registers and must be disclosed, for a flow that only some owners would use; the plugin registers no such hook.
 4. If T3 shows that an earlier "session" or "always" answer does let an action through unasked: drop 3a, or
    ship it only with a start-up check that refuses while such a grant exists?
 5. If M2 shows that a bot cannot create its own routine: keep 3b as "the bot does the inside, you do three

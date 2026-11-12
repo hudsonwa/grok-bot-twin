@@ -14,8 +14,8 @@ from typing import Any, Callable, Optional
 from . import bgagent, safe
 from . import osflags as _osflags
 from .engine import EngineError
-from .model import (SAMPLE_PROFILE, SETUP_ORDER, STATE_LABELS, ago, item_kind, item_name, plural, status_sentence,
-                    valid_id, valid_item_id)
+from .model import (SAMPLE_PROFILE, SETUP_ORDER, STATE_LABELS, ago, item_kind, item_name, open_conflicts, plural,
+                    status_sentence, valid_id, valid_item_id)
 
 DOT = {"in_step": "●", "changes_waiting": "◐", "needs_you": "!", "grok_missing": "?", "error": "×"}
 PAGE = "the Twins page in Hermes Desktop"
@@ -262,6 +262,7 @@ def _open_matters(p: dict) -> tuple:
             alarms += 1
     except (TypeError, ValueError):
         pass
+    alarms += len(open_conflicts(p))
     for w in (p.get("waiting") if isinstance(p.get("waiting"), list) else [])[:30]:
         if isinstance(w, dict) and w.get("item"):
             if w.get("to") == "grok":
@@ -334,6 +335,9 @@ def _next_step(p: dict, many: bool, names: Optional[dict] = None) -> str:
         return "run hermes twin doctor to see why Grok could not be checked."
     if int(p.get("conflicts") or 0):
         return f"choose which version to keep on {PAGE}, or run hermes twin conflicts{target}."
+    for c in open_conflicts(p)[:1]:  # (the instructions sync's card, or the Hermes -> Grok preview)
+        cmd = "instructions" if c.get("where") == "instructions" else "to-grok"
+        return f"choose which version to keep: hermes twin {cmd}{target}."
     if int(p.get("secrets_held") or 0) or p.get("secrets_withheld"):
         return ("remove the password or key from the bot's text in the Grok app; this clears by itself at the "
                 "next check.")

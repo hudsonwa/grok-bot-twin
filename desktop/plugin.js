@@ -505,6 +505,10 @@ function mattersOf(pair) {
     out.push({ id: 'conflict', kind: 'conflict', short: conflicts === 1 ? 'Changed in both places' : title, title })
   }
 
+  for (const c of Array.isArray(pair?.open_conflicts) ? pair.open_conflicts.slice(0, 10) : []) {
+    out.push({ id: `choose-${clean(c?.where, 20)}-${clean(c?.item, 120)}`, kind: 'choose', short: 'Changed in both places', title: 'Changed in both places' })
+  }
+
   for (const w of Array.isArray(pair?.waiting) ? pair.waiting.slice(0, 30) : []) {
     if (!w?.item) {
       continue
@@ -3799,7 +3803,8 @@ function forgetEverything(storage, shown = []) {
   const ids = new Set([...notedTwins(storage), ...shown])
 
   ids.forEach(id => typeof id === 'string' && id && forgetTwin(storage, id))
-  ;[NOTED_KEY, HOME_KEY, UNLINKED_KEY, PLACE_KEY, BATCH_KEY].forEach(k => storage?.remove?.(k))
+  ;// ('batch-open': a batch remembered by 0.3.3's removed "Let Hermes do the Grok part"; cleared here too)
+  ;[NOTED_KEY, HOME_KEY, UNLINKED_KEY, PLACE_KEY, 'batch-open'].forEach(k => storage?.remove?.(k))
 }
 
 // Something of the page's own is left although the plugin's data folder is empty (Grok Bot Twin was removed
@@ -6690,55 +6695,6 @@ function AddFlow({ open, onClose, onFinish, onSample, onLink, ready, storage = n
 const BATCH_EVERY_MS = 4_000
 const BATCH_WATCH_MS = 15 * 60 * 1000
 const BATCH_FILES = 20
-// While Hermes does the Grok part in another chat the page has gone: the open batch is remembered on this
-// computer (ids, the time watching began, when it was handed over) for half an hour, and the Twins page opens
-// the sheet again at the watching step, so the files Hermes saved meanwhile are brought in.
-const BATCH_KEY = 'batch-open'
-const BATCH_KEEP_MS = 30 * 60 * 1000
-
-function rememberBatch(storage, ids, since) {
-  try {
-    storage?.set?.(BATCH_KEY, { at: Date.now(), ids: ids.filter(i => typeof i === 'string' && i).slice(0, 50), since })
-  } catch {
-    // the sheet still works; it is only not opened again by itself
-  }
-}
-
-function forgetBatch(storage) {
-  try {
-    storage?.remove?.(BATCH_KEY)
-  } catch {
-    // nothing kept, nothing to clear
-  }
-}
-
-// The remembered batch, when it is younger than half an hour (an older one is cleared).
-function openBatchOf(storage, now = Date.now()) {
-  let kept = null
-
-  try {
-    kept = storage?.get?.(BATCH_KEY, null) ?? null
-  } catch {
-    return null
-  }
-
-  if (!kept || typeof kept !== 'object') {
-    return null
-  }
-
-  const ids = (Array.isArray(kept.ids) ? kept.ids : []).filter(i => typeof i === 'string' && i).slice(0, 50)
-  const at = Number(kept.at)
-  const since = Number(kept.since)
-
-  if (ids.length === 0 || !Number.isFinite(at) || !Number.isFinite(since) || now - at >= BATCH_KEEP_MS || now < at - 60_000) {
-    forgetBatch(storage)
-
-    return null
-  }
-
-  return { at, ids, since }
-}
-
 // "its instructions and a model" / "its instructions" / "a model"
 function needWords(left) {
   return joinWords([left.includes('instructions') && 'its instructions', left.includes('model') && 'a model'].filter(Boolean))
@@ -6812,27 +6768,22 @@ function batchLines(name, got, already) {
 
 // `initial…` let the smoke test render each state: the instructions step, a stopped watch, files brought in,
 // the permission check ticked, a model that was set.
-function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase = 'choose', initialTicked = null, initialModel = null, initialGot = {}, initialWatch = 'on', initialCopied = null, initialConsent = false, initialModelSaid = null, initialUnmatched = 0, resumed = null }) {
+function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase = 'choose', initialTicked = null, initialModel = null, initialGot = {}, initialWatch = 'on', initialCopied = null, initialModelSaid = null, initialUnmatched = 0 }) {
   const made = listOf(pairs).filter(p => typeof p?.pair_id === 'string' && p.pair_id)
   const ids = made.map(p => p.pair_id)
   const q = useQuery({ enabled: open && ids.length > 0, queryFn: () => api(`/batch?pair_ids=${ids.map(encodeURIComponent).join(',')}`), queryKey: [ID, 'batch', ids.join(',')], retry: false })
   // the twins as the page has them now: a twin whose instructions were pasted meanwhile counts as done
   const statusQ = useQuery({ enabled: open, queryFn: () => api('/status'), queryKey: STATUS_KEY })
-  // `resumed`: the batch remembered while Hermes does the Grok part (see BATCH_KEY): straight to the watching step
-  const [phase, setPhase] = useState(resumed ? 'instructions' : initialPhase) // 'choose' | 'instructions' | 'grok'
-  const [ticked, setTicked] = useState(() => initialTicked ?? Object.fromEntries(ids.map(i => [i, !resumed || resumed.ids.includes(i)])))
-  const [handedOff, setHandedOff] = useState(Boolean(resumed))
+  const [phase, setPhase] = useState(initialPhase) // 'choose' | 'instructions'
+  const [ticked, setTicked] = useState(() => initialTicked ?? Object.fromEntries(ids.map(i => [i, true])))
   const [typedModel, setTypedModel] = useState(initialModel) // null: the model Hermes uses, untouched
   const [endpointPick, setEndpointPick] = useState(null) // { name, model }: a model server already set up in Hermes
   const [got, setGot] = useState(initialGot)
   const [modelSaid, setModelSaid] = useState(initialModelSaid)
   const [watch, setWatch] = useState(initialWatch) // 'on' | 'stopped'
-  const [since, setSince] = useState(() => (resumed ? resumed.since : Math.floor(Date.now() / 1000) - 5))
+  const [since, setSince] = useState(() => Math.floor(Date.now() / 1000) - 5)
   const [scanProblem, setScanProblem] = useState(null)
   const [copied, setCopied] = useState(initialCopied)
-  const [consent, setConsent] = useState(initialConsent)
-  const [cuNow, setCuNow] = useState(null) // what the hand-over said, when it refused
-  const [handed, setHanded] = useState('') // the chat message, when neither the chat nor the clipboard took it
   const [over, setOver] = useState(false)
   const [problem, setProblem] = useState('')
   const [unmatched, setUnmatched] = useState(initialUnmatched)
@@ -6840,7 +6791,6 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
   const [busy, run] = useBusy()
   const picker = useRef(null)
   const scanning = useRef(false)
-  const cuQ = useQuery({ enabled: open && phase === 'grok', queryFn: () => api('/batch/computer-use'), queryKey: [ID, 'computer-use'], retry: false })
 
   const info = q.data && typeof q.data === 'object' ? q.data : null
   const twins = made.map(p => batchTwinOf(listOf(info?.twins).find(t => t?.pair_id === p.pair_id), p))
@@ -6875,32 +6825,6 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
   const doneFor = t => got[t.pairId]?.state === 'done' || already(t)
   const allDone = phase !== 'choose' && chosen.length > 0 && chosen.every(doneFor)
   const watching = open && phase !== 'choose' && watch === 'on' && !allDone && chosenIds.length > 0
-
-  // every twin is in: nothing left to come back to
-  useEffect(() => {
-    if (allDone && handedOff) {
-      forgetBatch(storage)
-    }
-  }, [allDone, handedOff])
-
-  // Done or Later: the batch is not opened again by itself
-  const close = () => {
-    if (handedOff) {
-      forgetBatch(storage)
-    }
-
-    onClose()
-  }
-
-  async function stopHermes() {
-    const res = await run('stop', () => post('/batch/grok-part', { stop: true }), 'Could not stop Hermes')
-
-    if (res) {
-      forgetBatch(storage)
-      setHandedOff(false)
-      host.notify({ id: `${ID}:grok-part`, kind: 'success', message: 'Hermes stopped the Grok part', meta: 'Nothing more is done in Grok. Paste the request yourself for the twins still waiting.' })
-    }
-  }
 
   function took(results) {
     const list = listOf(results)
@@ -7029,63 +6953,6 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
       setUnmatched(sent.filter(f => !used.has(f.name)).length)
       took(results)
     }
-  }
-
-  // Hermes does the Grok part in a chat of its own: only after the owner has read what it will do, ticked that
-  // they approve each step, and pressed Start. The message goes into the new chat's box; Send is the owner's.
-  async function startGrokPart() {
-    const res = await run('grok', () => post('/batch/grok-part', { pair_ids: chosenIds }), 'Could not hand the Grok part to Hermes')
-
-    if (!res) {
-      return
-    }
-
-    if (res.ok !== true) {
-      setCuNow(res.status && typeof res.status === 'object' ? res.status : { available: false, enable: [] })
-
-      return
-    }
-
-    const message = typeof res.message === 'string' ? res.message.slice(0, 8000) : ''
-    const canDraft = typeof host.composer?.setDraft === 'function'
-    const onClipboard = await copyText(message)
-
-    if (!onClipboard && !canDraft) {
-      setHanded(message)
-
-      return
-    }
-
-    // (the page goes with the new chat: the Twins page opens this sheet again at the watching step)
-    rememberBatch(storage, chosenIds, since)
-    setHandedOff(true)
-    setPhase('instructions')
-
-    if (typeof host.newChat === 'function') {
-      host.newChat()
-    } else {
-      host.navigate('/')
-    }
-
-    let put = false
-
-    if (canDraft) {
-      await pause(400)
-
-      try {
-        put = (await host.composer.setDraft(null, message)) === true
-      } catch {
-        put = false
-      }
-    }
-
-    host.notify({
-      durationMs: 30_000,
-      id: `${ID}:grok-part`,
-      kind: 'info',
-      message: put ? 'The request is in the new chat' : 'Paste it into the new chat',
-      meta: `${put ? 'Read it, then press Send.' : 'It is copied.'} Every click in Grok asks you first: answer Once each time. Stop it with Stop or /stop.`
-    })
   }
 
   const hover = e => {
@@ -7235,63 +7102,6 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
       ),
       el(Button, { disabled: Boolean(busy) || none || !info, key: 'all', loading: busy === 'model', onClick: () => void doAll() }, solo ? 'Do it now' : 'Do all ticked now')
     ]
-  } else if (phase === 'grok') {
-    // ── Hermes does the Grok part: what it will do, and the owner's word first ──
-    const cu = cuNow ?? (cuQ.data && typeof cuQ.data === 'object' ? cuQ.data : null)
-    const enable = listOf(cu?.enable).map(s => plainText(s, 240)).filter(Boolean).slice(0, 8)
-    const each = chosen.length === 1 ? `${chosen[0].name}'s chat` : 'the chat of each ticked bot'
-
-    title = 'Let Hermes do the Grok part'
-
-    if (!cu && cuQ.isError) {
-      description = 'Hermes could not tell whether it can use the Grok app here.'
-      body = jsx(InlineProblem, { error: cuQ.error, onRetry: () => void cuQ.refetch() })
-    } else if (!cu) {
-      description = 'Looking at what Hermes may use on this computer.'
-      body = jsx(LinesSkeleton, { rows: 3 })
-    } else if (cu.available !== true) {
-      description = 'Hermes needs a few things switched on first.'
-      body = el(
-        'div',
-        { className: 'flex flex-col gap-2' },
-        el('ul', { 'aria-label': 'What to switch on', className: cn(BODY, 'flex list-disc flex-col gap-1 pl-5') }, (enable.length > 0 ? enable : ['Hermes cannot use other apps on this computer yet.']).map((s, i) => el('li', { key: i }, s))),
-        el('p', { className: SMALL }, 'Nothing is lost meanwhile: go back and paste the request yourself.')
-      )
-    } else if (handed) {
-      description = 'Copy this message into a new Hermes chat.'
-      body = el(
-        'div',
-        { className: 'flex flex-col gap-2' },
-        el('pre', { className: cn(PRE, 'max-h-40 select-all'), tabIndex: 0 }, handed),
-        el('div', {}, jsx(CopyButton, { appearance: 'button', buttonVariant: 'secondary', label: 'Copy', showLabel: true, text: handed }))
-      )
-    } else {
-      description = 'Read this before anything starts.'
-      body = el(
-        'div',
-        { className: 'flex flex-col gap-3' },
-        el(
-          'section',
-          { 'aria-label': 'What Hermes will do', className: cn(NOTE, 'flex flex-col gap-1.5') },
-          el('h3', { className: HEADING }, 'Before Hermes starts'),
-          el(
-            'ul',
-            { className: 'flex list-disc flex-col gap-1 pl-5' },
-            el('li', {}, `In a new Hermes chat, Hermes opens ${each} in the Grok app, pastes the request and saves the answer to your Downloads folder.`),
-            el('li', {}, 'Every click asks you first: answer Once each time.'),
-            el('li', {}, "Screenshots of the Grok window go to this chat's model provider."),
-            el('li', {}, 'You can stop it at any time with Stop, or by typing /stop.')
-          )
-        ),
-        jsx(CheckRow, { checked: consent, disabled: Boolean(busy), id: 'batch-consent', label: 'I will approve each step myself', onChange: setConsent, title: 'I will approve each step myself' })
-      )
-    }
-
-    footer = [
-      el(Button, { disabled: Boolean(busy), key: 'back', onClick: () => { setPhase('instructions'); setCuNow(null); setHanded('') }, variant: cu?.available === true && !handed ? 'ghost' : 'default' }, 'Back'),
-      cu && cu.available !== true && el(Button, { disabled: Boolean(busy) || cuQ.isFetching, key: 'again', onClick: () => { setCuNow(null); void cuQ.refetch() }, variant: 'secondary' }, 'Look again'),
-      cu?.available === true && !handed && el(Button, { disabled: Boolean(busy) || !consent, key: 'start', loading: busy === 'grok', onClick: () => void startGrokPart() }, 'Start in a new Hermes chat')
-    ].filter(Boolean)
   } else {
     // ── the instructions: one request, pasted into each bot's chat; the files come back by themselves ──
     const solo = chosen.length === 1
@@ -7346,7 +7156,7 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
         progress,
         routinesIn > 0 && el('p', { className: SMALL }, 'Routines stay switched off until you choose Move routines to Hermes in a twin\'s "…" menu.')
       )
-      footer = [el(Button, { key: 'done', onClick: close }, 'Done')]
+      footer = [el(Button, { key: 'done', onClick: onClose }, 'Done')]
     } else {
       const askSaid = copied === true ? (solo ? `Copied. Paste it into ${owned(chosen[0].name)} chat in Grok.` : "Copied. Paste it into each bot's chat in Grok.") : copied === false ? 'Copy this yourself:' : null
 
@@ -7363,13 +7173,6 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
           }
         },
         modelLine,
-        handedOff &&
-          el(
-            'div',
-            { className: cn(NOTE, 'flex flex-wrap items-center gap-2') },
-            el('span', { className: 'min-w-0 flex-1 text-(--ui-text-primary)', role: 'status' }, 'Hermes is doing the Grok part in another chat. Files it saves to Downloads are picked up here.'),
-            el(Button, { disabled: Boolean(busy), loading: busy === 'stop', onClick: () => void stopHermes(), variant: 'text' }, 'Stop Hermes')
-          ),
         el(
           'ol',
           { 'aria-label': 'What to do in Grok', className: cn(BODY, 'flex list-decimal flex-col gap-2 pl-5') },
@@ -7453,11 +7256,10 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
         el(
           'div',
           { className: 'flex flex-wrap gap-2' },
-          el(Button, { disabled: Boolean(busy) || chosenIds.length === 0, onClick: () => setPhase('grok'), variant: 'text' }, 'Let Hermes do the Grok part'),
           syncFor && el(Button, { disabled: Boolean(busy), onClick: () => setAside({ kind: 'sync', pairId: syncFor }), variant: 'text' }, 'Keep their skills the same with Skill sync…')
         )
       )
-      footer = [el(Button, { disabled: Boolean(busy), key: 'later', onClick: close, title: 'Watching stops when this closes. Each twin keeps what is left in its row.', variant: 'ghost' }, 'Later')]
+      footer = [el(Button, { disabled: Boolean(busy), key: 'later', onClick: onClose, title: 'Watching stops when this closes. Each twin keeps what is left in its row.', variant: 'ghost' }, 'Later')]
     }
   }
 
@@ -7468,7 +7270,7 @@ function BatchSheet({ pairs, open, onClose, onOneAtATime, storage, initialPhase 
       ? jsx(SkillSyncSheet, { onClose: () => setAside(null), open: true, pair: asidePair, storage }, 'aside')
       : jsx(FinishSheet, { onClose: () => setAside(null), open: true, pair: asidePair, storage }, 'aside'))
 
-  return el(Sheet, { description, footer, locked: Boolean(busy), onClose: close, open, title, wide: true }, ...many(body), asideSheet)
+  return el(Sheet, { description, footer, locked: Boolean(busy), onClose, open, title, wide: true }, ...many(body), asideSheet)
 }
 
 // ── sample ──────────────────────────────────────────────────────────────────
@@ -8818,15 +8620,13 @@ const TASKS_WHEN_ON = 'When on, your twins on your other computers can ask their
 const TASKS_ON_SHORT = 'On.'
 const TASKS_ON = 'Your twins on your other computers can ask their copies here to do things. Hermes asks for your approval here, by the same rules as in your own chats.'
 // What happens here when a step needs approval is the owner's choice on this computer (GET /tasks `mode`):
-// the last sentence of the line above says which of the three it is.
-const TASK_MODES = ['here', 'linked', 'safe']
+// the last sentence of the line above says which of the two it is.
+const TASK_MODES = ['here', 'safe']
 const TASKS_APPROVAL = {
   here: 'Hermes asks for your approval here, by the same rules as in your own chats.',
-  linked: 'Hermes asks for your approval here or on the computer that asked, by the same rules as in your own chats.',
   safe: 'A step that would need your approval is refused at once.'
 }
 const tasksSaid = (on, mode) => (mode === 'here' ? (on ? TASKS_ON : TASKS_WHEN_ON) : `${on ? 'Your' : 'When on, your'} twins on your other computers can ask their copies here to do things. ${TASKS_APPROVAL[mode]}`)
-const TASKS_MODE_TITLE = 'Let your linked computers approve steps here?'
 const TASKS_HOME_NETWORK = 'Your computers are linked over your home network: what is asked and what comes back can be read by others on it.'
 const TASK_OPEN = ['queued', 'running', 'waiting_approval']
 
@@ -8855,24 +8655,15 @@ function tasksOf(raw) {
     .filter(w => w && typeof w === 'object' && /^k-[0-9a-f]{16}$/.test(String(w.id ?? '')))
     .slice(0, 5)
     .map(w => ({ command: text(w.command, 400), description: text(w.description), id: w.id, peer: text(w.peer, 40), q: /^[0-9a-f]{8}$/.test(String(w.q ?? '')) ? w.q : '', text: text(w.text), twin: text(w.twin, 100) }))
-  // steps that wait on another computer for a request asked from here, which that computer lets this one answer:
-  // the answer always names the very step shown (`q`), so an entry without that mark is not shown
-  const asking = (Array.isArray(raw.asking) ? raw.asking : [])
-    .filter(w => w && typeof w === 'object' && /^k-[0-9a-f]{16}$/.test(String(w.id ?? '')) && /^[0-9a-f]{8}$/.test(String(w.q ?? '')))
-    .slice(0, 5)
-    .map(w => ({ command: text(w.command, 400), description: text(w.description), id: w.id, peer: text(w.peer, 40) || 'another computer', q: w.q, text: text(w.text), twin: text(w.twin, 100) }))
   // what happens here when a step needs approval; an older backend says nothing, and then nothing is offered
   const m = raw.mode && typeof raw.mode === 'object' ? raw.mode : {}
-  const warning = text(m.warning, 300)
   const value = TASK_MODES.includes(m.value) ? m.value : 'here'
   const choices = (Array.isArray(m.choices) ? m.choices : [])
     .filter((c, i, all) => c && typeof c === 'object' && TASK_MODES.includes(c.value) && all.findIndex(o => o?.value === c.value) === i)
     .map(c => ({ label: text(c.label, 80), note: text(c.note, 200), value: c.value }))
-    // (letting other computers approve is never offered without the sentence that says what it means)
-    .filter(c => c.label && (c.value !== 'linked' || warning || value === 'linked'))
+    .filter(c => c.label)
 
   return {
-    asking,
     computers: (Array.isArray(raw.machines) ? raw.machines : []).map(m => text(m?.name, 40)).filter(Boolean),
     // which of them take requests, when the backend says (optional): the example then names one that does
     taking: (Array.isArray(raw.machines) ? raw.machines : []).filter(m => m?.takes_requests === true).map(m => text(m?.name, 40)).filter(Boolean),
@@ -8880,7 +8671,7 @@ function tasksOf(raw) {
     homeNetwork: raw.switch.network === 'lan',
     linked: raw.linked === true,
     log,
-    mode: { choices, label: text(m.label, 80) || 'When a step needs approval', value, warning },
+    mode: { choices, label: text(m.label, 80) || 'When a step needs approval', value },
     on: raw.switch.on === true,
     open: log.some(r => TASK_OPEN.includes(r.state)),
     waiting
@@ -8920,31 +8711,10 @@ function RequestsWaiting({ lead = false }) {
   const [busy, run] = useBusy()
   const tasks = useRequests()
 
-  if (!tasks || tasks.waiting.length + tasks.asking.length === 0) {
+  if (!tasks || tasks.waiting.length === 0) {
     return null
   }
 
-  // A step that waits on another computer for a request sent from here, which that computer lets this one answer.
-  const answerThere = (w, choice) =>
-    void run(
-      `${choice}:there:${w.id}`,
-      async () => {
-        try {
-          // `q` names the very step shown here, always: the answer cannot count for a later step
-          showRequests(await post(`/tasks/${encodeURIComponent(w.id)}/answer`, { choice, q: w.q }))
-        } catch (err) {
-          // another step waits by now: show that one, then say so
-          if (asProblem(err).code === 'step_changed') {
-            void queryClient.invalidateQueries({ queryKey: TASKS_KEY })
-          }
-
-          throw err
-        }
-
-        host.notify({ id: `${ID}:tasks:answered`, kind: choice === 'once' ? 'success' : 'info', message: choice === 'once' ? `Sent to ${w.peer}: do that one step once.` : `Sent to ${w.peer}: don't do that step.` })
-      },
-      'Could not pass your answer on'
-    )
   const answer = (w, choice) =>
     void run(
       `${choice}:${w.id}`,
@@ -8985,28 +8755,11 @@ function RequestsWaiting({ lead = false }) {
           el('span', { className: 'min-w-0 flex-1' }, 'Nothing happens until then.')
         )
       )
-    ),
-    // (after what waits here: the page's main button goes to the first step of all)
-    tasks.asking.map((w, i) =>
-      el(
-        'div',
-        { 'aria-label': `Your request to ${w.peer} waits for your approval`, className: cn(NOTE, 'flex flex-col gap-2'), key: `there:${w.id}`, role: 'alert' },
-        el('span', { className: 'text-(--ui-text-primary)' }, `${w.peer} asks before it does one step for your request to ${w.twin || 'a twin'}: ${w.text}`),
-        el('span', {}, w.description ? `One step needs your approval: ${w.description}.` : 'One step needs your approval.'),
-        w.command && el('code', { className: 'min-w-0 break-all rounded-md bg-(--ui-bg-quaternary) px-2.5 py-1 font-mono text-xs text-(--ui-text-primary)' }, w.command),
-        el(
-          'div',
-          { className: 'flex flex-wrap items-center gap-2' },
-          el(Button, { 'aria-label': `Do it once: the step on ${w.peer}`, disabled: Boolean(busy), loading: busy === `once:there:${w.id}`, onClick: () => answerThere(w, 'once'), variant: mainVariant(lead && tasks.waiting.length === 0 && i === 0) }, 'Do it once'),
-          el(Button, { 'aria-label': `Don't do the step on ${w.peer}`, disabled: Boolean(busy), loading: busy === `deny:there:${w.id}`, onClick: () => answerThere(w, 'deny'), variant: 'text' }, "Don't"),
-          el('span', { className: 'min-w-0 flex-1' }, `Nothing happens on ${w.peer} until then. You can also answer on ${w.peer}.`)
-        )
-      )
     )
   )
 }
 
-// What happens on this computer when a step of a request needs approval: three choices, one line each, as the
+// What happens on this computer when a step of a request needs approval: two choices, one line each, as the
 // backend words them. Plain radio buttons under one name: Tab reaches the group, the arrow keys move in it.
 function ModeChoice({ choice, checked, disabled, onChoose }) {
   const id = `gbt-tasks-mode-${choice.value}`
@@ -9025,9 +8778,8 @@ function ModeChoice({ choice, checked, disabled, onChoose }) {
   )
 }
 
-function RequestsSection({ initialOpen = false, initialHow = false, initialConfirm = false }) {
+function RequestsSection({ initialOpen = false, initialHow = false }) {
   const [busy, run] = useBusy()
-  const [confirm, setConfirm] = useState(initialConfirm)
   const tasks = useRequests()
 
   if (!tasks) {
@@ -9037,18 +8789,13 @@ function RequestsSection({ initialOpen = false, initialHow = false, initialConfi
   const flip = on => void run('tasks', async () => showRequests(await post('/tasks/switch', { on })), on ? 'Could not switch this on' : 'Could not switch this off')
   const { mode } = tasks
   const setMode = value => run('mode', async () => showRequests(await post('/tasks/mode', { mode: value })), 'Could not change this')
-  // Asking here, or refusing such steps, takes nothing from the owner: at once. Letting other computers approve
-  // is said in one sentence first (the backend's own), and happens only when the owner then says so.
+  // Asking here, or refusing such steps, takes nothing from the owner: at once.
   const choose = value => {
     if (busy || value === mode.value) {
       return
     }
 
-    if (value === 'linked') {
-      setConfirm(true)
-    } else {
-      void setMode(value)
-    }
+    void setMode(value)
   }
   const offered = tasks.on && mode.choices.length > 0
   // The example names a computer that takes requests when one is known: the backend says so, or one answered
@@ -9079,18 +8826,6 @@ function RequestsSection({ initialOpen = false, initialHow = false, initialConfi
           el('span', { 'aria-hidden': true, className: HEADING }, mode.label),
           mode.choices.map(c => jsx(ModeChoice, { checked: c.value === mode.value, choice: c, disabled: Boolean(busy), onChoose: choose }, c.value))
         ),
-      offered &&
-        confirm === true &&
-        Boolean(mode.warning) &&
-        jsx(Confirm, {
-          cancelLabel: 'Cancel',
-          confirmLabel: 'Let them approve',
-          description: mode.warning,
-          onClose: () => setConfirm(false),
-          onConfirm: () => setMode('linked'),
-          open: true,
-          title: TASKS_MODE_TITLE
-        }),
       // how to ask from this computer: the one line a first request needs, folded so the card stays short
       // (asking needs no switch here; the computer that is asked needs its own switch on)
       el(
@@ -9765,14 +9500,7 @@ function SettingsSection({ initialOpen = false }) {
 function toastTasks(payload) {
   const what = clean(payload?.what, 40)
 
-  if (pageOpen > 0 || (what !== 'needs_approval' && what !== 'needs_answer')) {
-    return
-  }
-
-  // a step on another computer, for a request sent from here, which that computer lets this one answer
-  if (what === 'needs_answer') {
-    host.notify({ action: OPEN_TWINS, durationMs: WARNING_TOAST_MS, id: `${ID}:tasks:asking`, kind: 'warning', message: 'A step on another computer waits for your approval', meta: 'A request you sent needs one step approved. Open Twins to answer.' })
-
+  if (pageOpen > 0 || what !== 'needs_approval') {
     return
   }
 
@@ -10520,8 +10248,6 @@ function TwinsPage({ storage, initialBack = 'idle', initialMountedAt = null }) {
   const [stopped, setStopped] = useState(null) // what became of a twin that was just stopped (see StoppedLine)
   const [removed, setRemoved] = useState(() => storage?.get(REMOVED_KEY, null) ?? null)
   const [back, setBack] = useState(initialBack) // 'idle' | 'going' | 'done' | 'failed'
-  // a batch handed to Hermes for the Grok part less than half an hour ago: its sheet opens again (BATCH_KEY)
-  const [openBatch, setOpenBatch] = useState(() => openBatchOf(storage))
   const mountedAt = useRef(initialMountedAt ?? Date.now())
   const titleRef = useRef(null)
 
@@ -10542,7 +10268,7 @@ function TwinsPage({ storage, initialBack = 'idle', initialMountedAt = null }) {
   // is counted in the header, and its "Do it once" is the page's one main button.
   const requests = useRequests(following || fleet?.role === 'source')
   // (a step on another computer that this one may answer needs the owner just the same)
-  const asking = requests ? requests.waiting.length + requests.asking.length : 0
+  const asking = requests ? requests.waiting.length : 0
   // `held`: no twin follows Grok right now. A trouble that some twins share (and others do not) has its banner too,
   // but the page as a whole is not held.
   const held = trouble !== null && trouble.partial !== true
@@ -10945,20 +10671,6 @@ function TwinsPage({ storage, initialBack = 'idle', initialMountedAt = null }) {
         problem: flowProblem,
         ready: setupReady && data?.setup?.ready === true && data?.setup?.grok_app_found !== false,
         reconnect: flow === 'reconnect',
-        storage
-      }),
-    openBatch &&
-      !flow &&
-      pairs.some(p => openBatch.ids.includes(p?.pair_id)) &&
-      jsx(BatchSheet, {
-        onClose: () => setOpenBatch(null),
-        onOneAtATime: pairId => {
-          setOpenBatch(null)
-          setRequest({ pairId, sheet: 'finish' })
-        },
-        open: true,
-        pairs: pairs.filter(p => openBatch.ids.includes(p?.pair_id)),
-        resumed: openBatch,
         storage
       }),
     sheet === 'privacy' && jsx(PrivacySheet, { onClose: () => setSheet(null), open: true }),

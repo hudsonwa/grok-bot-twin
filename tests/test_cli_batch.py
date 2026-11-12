@@ -61,7 +61,7 @@ class FakeBatch:
                           "model": "", "sample": True})
         return {"request": sx.REQUEST, "privacy": sx.PRIVACY, "default_model": self.default_model,
                 "models": self.models, "twins": twins, "downloads": {"available": True, "label": "Downloads"},
-                "skill_sync": {"set_up": False, "pair_ids": []}, "computer_use": {"available": False}}
+                "skill_sync": {"set_up": False, "pair_ids": []}}
 
     def batch_models(self, pids, model):
         self.model_calls.append((list(pids), model))

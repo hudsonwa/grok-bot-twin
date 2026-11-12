@@ -74,6 +74,8 @@ def test_timer_lazy_start_and_stop(svc, monkeypatch):
     calls = []
     monkeypatch.setattr(svc, "tick", lambda: calls.append(time.monotonic()) or 0)
     assert not timer.running()
+    assert timer.ensure_started(lambda: svc) is False  # nothing to do yet: no thread (tests/test_c2_f11.py)
+    svc.demo_action("start")
     assert timer.ensure_started(lambda: svc) is True
     assert timer.running()
     assert timer.ensure_started(lambda: svc) is False  # one thread per process

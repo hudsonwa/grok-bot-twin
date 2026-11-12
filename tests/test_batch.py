@@ -391,7 +391,7 @@ def test_batch_info(world, home):
     config_of(home, "test-scout").write_text("model: not a plain id\n")
     info = world.batch_info(["recipe-planner", "acme-support", SAMPLE])
     assert set(info) == {"request", "pickup", "privacy", "default_model", "models", "twins", "downloads", "skill_sync",
-                         "computer_use", "endpoints"}
+                         "endpoints"}
     assert info["request"] == sx.REQUEST and info["privacy"] == sx.PRIVACY
     assert info["default_model"] == "grok-4.7" and info["models"] == ["grok-4.7", "invented/model-2"]
     assert info["twins"] == [
@@ -408,8 +408,6 @@ def test_batch_info(world, home):
     assert str(Path.home()) not in json.dumps(info)
     assert len(info["twins"]) == 4
     assert info["skill_sync"] == {"set_up": False, "pair_ids": []}
-    cu = info["computer_use"]
-    assert isinstance(cu["available"], bool) and isinstance(cu["why"], str)
 
 
 # =====================================================================================================================
@@ -437,6 +435,4 @@ def test_the_routes(twin, home, monkeypatch):
         "files": 0, "results": [], "waiting": [pid]}
     assert c.post(f"{P}/batch/downloads", json={"since": 0, "apply": "no"}).status_code == 400
     assert c.post(f"{P}/batch/match", json={"files": files, "pair_ids": ["../x"]}).status_code == 400
-    assert isinstance(c.get(f"{P}/batch/computer-use").json()["available"], bool)
-    assert c.post(f"{P}/batch/grok-part", json={"stop": True}).json() == {"ok": True}
     nothing_kept(home)

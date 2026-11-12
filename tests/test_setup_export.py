@@ -652,7 +652,7 @@ def test_no_check_runs_over_more_than_a_field_may_hold(monkeypatch):
     real = sx._secrets.has_secret
     monkeypatch.setattr(sx._secrets, "has_secret", lambda t: (seen.append(len(t)), real(t))[1])
     real_flag = sx._secrets.flagged_lines
-    monkeypatch.setattr(sx._secrets, "flagged_lines", lambda t, prose=True: (seen.append(len(t)), real_flag(t, prose))[1])
+    monkeypatch.setattr(sx._secrets, "flagged_lines", lambda t: (seen.append(len(t)), real_flag(t))[1])
     huge = ("a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q " * 60_000)[:1_900_000]
     base = {"name": "R", "instruction": "Do an invented thing.", "trigger": "schedule", "schedule_cron": "0 9 * * *"}
     doc = export(instructions=huge, name="Acme Support", apps=[{"name": huge}],

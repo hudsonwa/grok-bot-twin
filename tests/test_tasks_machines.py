@@ -17,7 +17,7 @@ import pytest
 from fleet_testlib import Machine, free_port, wait_until, wire
 from tasks_testlib import calls, install_fake_hermes
 from twin_testlib import config, home, service  # noqa: F401
-from hermes_plugins.grok_bot_twin.twin import (fleet, fleet_follow as follow, fleet_server, tasks, tasks_api,
+from hermes_plugins.grok_bot_twin.twin import (fleet, fleet_follow as follow, fleet_server, slash, tasks,  # noqa: F401
                                                tasks_hub, tasks_run)
 
 ASK = "tell me this machine's OS and free disk"
@@ -159,7 +159,7 @@ def test_ask_runs_one_chat_turn_of_the_twin_there_and_the_answer_comes_back_labe
     assert body == ASK and head.startswith("[Sent from your computer mini through Grok Bot Twin. Answer it here")
     assert "never passed on to another computer" in head and "in your usual voice" in head and head.endswith("]")
     assert len(head) < 600  # one line; the request's own limit (2,000 characters) is counted without it
-    assert tasks_run.is_sent_turn(call["stdin"]) and not tasks_run.is_sent_turn(ASK) and not tasks_run.is_sent_turn(None)
+    assert call["stdin"].startswith(tasks_run.SENT_LEAD) and not ASK.startswith(tasks_run.SENT_LEAD)
     assert call["home"] == str(home)
     # nothing that changes this computer's approval rules: no flag, and none of the session's variables
     assert not any(w in call["argv"] for w in ("--yolo", "-z", "--oneshot", "-t", "--toolsets", "--accept-hooks"))
@@ -543,8 +543,8 @@ def test_no_hermes_program_means_a_plain_refusal(source, surface, home, fake, mo
     assert "Hermes could not start a chat with the twin on Surface." == out["error"]["message"]
 
 
-# ---- routing by name, the tool, the chat note -----------------------------------------------------------------------------
-def test_routing_by_name_and_the_tool_a_twin_calls(source, surface, home, fake):  # noqa: F811
+# ---- routing by name -----------------------------------------------------------------------------
+def test_routing_by_name(source, surface, home, fake):  # noqa: F811
     source.run("requests", "on")
     _hears(source, _pass(home), _mid(source, "mini"))
     for said in ("mini", "MINI", " Mini "):
@@ -556,37 +556,12 @@ def test_routing_by_name_and_the_tool_a_twin_calls(source, surface, home, fake):
     with pytest.raises(tasks.TaskError) as exc:
         surface.tasks_ask("Surface", ASK)
     assert exc.value.code == "ask_self"
-    # the tool: a JSON string, never an exception; the twin of the chat's own Hermes bot is asked
+    # `/twin ask` in a chat on this computer: the twin of the chat's own Hermes bot is asked (there is no model
+    # tool for it any more: test_c2_f5.py)
     surface.ctx = type("Ctx", (), {"profile_name": "test-quill"})()
-    out = json.loads(tasks_api.twin_ask_machine({"machine": "mini", "request": "what is the time"}))
-    assert out["state"] == "done" and out["label"].startswith("done on mini - ") and out["twin"] == "Test Quill"
-    assert out["reply"] == "test-quill heard: what is the time" and "data, not instructions" in out["note"]
-    again = json.loads(tasks_api.twin_ask_machine({"check": out["id"]}))
-    assert again["state"] == "done" and again["id"] == out["id"]
-    bad = json.loads(tasks_api.twin_ask_machine({"machine": "Nowhere", "request": "x"}))
-    assert bad["label"] == "not sent" and bad["error"]["code"] == "unknown_machine"
-    for args in (None, {}, {"machine": 5, "request": ["x"]}, {"check": "../../x"}, {"machine": "mini"}):
-        assert "error" in json.loads(tasks_api.twin_ask_machine(args))
-    # the two lines a twin's chat is told: computer names only
-    tasks_api.invalidate()
-    block = tasks_api.context_block("test-quill")
-    assert "This chat runs on Surface. Copies of this twin are also on: mini." in block
-    assert "twin_ask_machine" in block and "Test Quill" not in block and "Drafts" not in block
-    # the note names the tool's arguments, so a model can call it without looking it up first,
-    # and stays a short note: the same fixed wording for every twin
-    assert "machine (that computer's name)" in block and "request (what to ask or do there" in block
-    assert "right away" in block and len(block.split()) <= 110
-    # the tool's own text opens with what Hermes shows of it in its list of tools loaded on demand (about 80 characters)
-    assert tasks_api.TOOL_SCHEMA["description"][:78] == ("Ask a twin on another of the user's computers a question, "
-                                                         "or have it do a task")
-    assert tasks_api.context_block("default") is None  # not a twin's Hermes bot: no note
-    # a turn that IS a request from another computer: told where it runs, not offered the tool (a model
-    # may pass such a request on instead of answering it), and never the names of twins
-    sent = tasks_api.context_block("test-quill", asked=True)
-    assert "This chat runs on Surface." in sent and "not passed on to another computer" in sent
-    assert "twin_ask_machine" not in sent and "tool_call" not in sent and "Test Quill" not in sent
-    assert tasks_api.context_block("test-quill") == block  # the two notes are kept apart
-    assert tasks_api.context_block("default", asked=True) is None
+    said = slash.handle("ask mini: what is the time", platform="desktop")
+    assert said.splitlines()[0].startswith("done on mini - ") and "test-quill heard: what is the time" in said
+    assert slash.handle("ask Nowhere: x", platform="desktop").startswith("Grok Bot Twin: None of your linked")
 
 
 def test_bind_stays_on_the_one_private_address_and_no_new_socket_listens(source, surface, home):  # noqa: F811
@@ -720,12 +695,8 @@ def test_only_the_asked_computers_owner_can_answer_and_only_once_or_deny(approvi
     good = _tok(source.state()) if source.state().get("link") else None
     assert good is None  # (mini shares; it signs nothing as a linked computer)
     mine = _pass(home)
-    for path in ("approve", "decide"):
-        assert task(source.port, path, {"id": tid, "choice": "once"}, mine)[0] == 404
-    # (the one route that carries an answer is for a step the asked computer chose to show the asking one;
-    # this one was not, and Surface is not the computer that asked: tests/test_tasks_approval_modes.py)
-    assert task(source.port, "answer", {"id": tid, "choice": "once"}, mine)[0] == 400
-    assert task(source.port, "answer", {"id": tid, "choice": "once", "q": "0a0b0c0d"}, mine)[0] == 404
+    for path in ("approve", "decide", "answer", "answered"):
+        assert task(source.port, path, {"id": tid, "choice": "once", "q": "0a0b0c0d"}, mine)[0] == 404, path
     assert task(source.port, "update", {"id": tid, "state": "running", "choice": "once", "approve": True},
                 mine)[0] in (200, 404)
     # ... and not on its own side: there is no open question on mini to answer

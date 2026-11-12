@@ -182,6 +182,8 @@ def test_a_conversations_own_id_cannot_be_confirmed_from_a_copy_without_the_key(
 def test_the_search_tool_says_nothing_for_a_request_from_another_computer(home, monkeypatch):
     import types
     from hermes_plugins.grok_bot_twin.twin import tasks, tools
+    from test_transcripts_tool import local_chat
+    local_chat(monkeypatch)
     tr.switch(A, True)
     tr.ingest_grok(A, _export(_conv("g1", "Bread", "sourdough starter notes")))
 

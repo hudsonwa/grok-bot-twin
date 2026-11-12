@@ -169,6 +169,7 @@ def status_sentence(p: dict) -> str:
     if conflicts:
         matters.append((False, "Changed in both places" if conflicts == 1
                         else f"{conflicts} things changed in both places", 1))
+    matters += [(False, "Changed in both places", 1) for _ in open_conflicts(p)]
     for w in (p.get("waiting") if isinstance(p.get("waiting"), list) else [])[:30]:
         if not isinstance(w, dict) or not w.get("item"):
             continue
@@ -205,13 +206,16 @@ def status_sentence(p: dict) -> str:
     return FOLLOWS if sample else f"{FOLLOWS} · ready"
 
 
-def things(n: int, one: str, many: str) -> str:
-    return f"{n} {one if n == 1 else many}"
+def open_conflicts(pair: dict) -> list:
+    """The open choices of the instructions sync and of Hermes -> Grok (the service lists them; botport's own are
+    `conflicts`)."""
+    oc = pair.get("open_conflicts")
+    return [c for c in oc if isinstance(c, dict) and isinstance(c.get("item"), str)] if isinstance(oc, list) else []
 
 
 def derive_state(pair: dict) -> tuple[str, str]:
     """State + short reason from a pair status dict (used when an engine omits them). The reason names every
-    open matter in plain words, joined with "; " (never one of several)."""
+    open matter in plain words, joined with "; " (never one of several). Any open conflict means "needs_you"."""
     if pair.get("grok", {}).get("present") is False:
         return "grok_missing", "This bot is not in the Grok app any more"
     conflicts = int(pair.get("conflicts") or 0)
@@ -220,9 +224,12 @@ def derive_state(pair: dict) -> tuple[str, str]:
     waiting = int(pending.get("waiting_approval") or 0)
     needs = []
     if conflicts:
-        needs.append(f"{things(conflicts, 'item', 'items')} changed in both places")
+        needs.append(f"{plural(conflicts, 'item')} changed in both places")
+    other = list(dict.fromkeys(item_kind(c["item"]) for c in open_conflicts(pair)))
+    if other:
+        needs.append(f"choose which {_word_list(other)} to keep")
     if held:
-        needs.append(f"{things(held, 'thing', 'things')} that {'looks' if held == 1 else 'look'} like a password "
+        needs.append(f"{plural(held, 'thing')} that {'looks' if held == 1 else 'look'} like a password "
                      f"or key {'was' if held == 1 else 'were'} not copied")
     if waiting:
         needs.append(f"{plural(waiting, 'change')} ready to send to Grok")
@@ -234,7 +241,8 @@ def derive_state(pair: dict) -> tuple[str, str]:
     if to_g:
         moving.append(f"{plural(to_g, 'change')} to send to Grok")
     if needs:
-        return "needs_you", "; ".join(needs + moving)
+        reason = "; ".join(needs + moving)
+        return "needs_you", reason[:1].upper() + reason[1:]
     if moving:
         return "changes_waiting", "; ".join(moving)
     return "in_step", "Up to date"
@@ -301,7 +309,7 @@ def preview_lines(entry: Any) -> list[str]:
     sw = entry.get("secrets_withheld") if isinstance(entry, dict) else None
     held = held or (len({str(w.get("item")) for w in sw if isinstance(w, dict)}) if isinstance(sw, list) else 0)
     if held:
-        lines.append(f"{things(held, 'thing', 'things')} that {'looks' if held == 1 else 'look'} like a password or "
+        lines.append(f"{plural(held, 'thing')} that {'looks' if held == 1 else 'look'} like a password or "
                      "key will not be copied.")
     return lines
 

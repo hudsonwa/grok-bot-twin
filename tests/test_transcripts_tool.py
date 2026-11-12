@@ -57,8 +57,23 @@ def _constants(override, process_home):
     return consts
 
 
+def local_chat(monkeypatch) -> None:
+    """Stand in for Hermes' own per-chat values (gateway.session_context): a chat in Hermes Desktop, unless the
+    environment says otherwise. Without Hermes' module the tool refuses (it fails closed: test_c2_f5.py)."""
+    import os
+    ctx = types.ModuleType("gateway.session_context")
+    ctx.get_session_env = lambda name, default="": os.environ.get(
+        name, {"HERMES_SESSION_SOURCE": "desktop"}.get(name, default))
+    pkg = types.ModuleType("gateway")
+    pkg.__path__ = []
+    monkeypatch.setitem(sys.modules, "gateway", pkg)
+    monkeypatch.setitem(sys.modules, "gateway.session_context", ctx)
+
+
 @pytest.fixture
 def as_twin(home, monkeypatch):  # noqa: F811
+    local_chat(monkeypatch)
+
     def _as(profile: str):
         monkeypatch.setattr(tools, "_svc", lambda: _Svc(profile, PAIRS))
         where = home / "hermes-root" if profile == "default" else home / "hermes-root" / "profiles" / profile
@@ -110,6 +125,7 @@ def test_another_twin_never_sees_the_first_twins_conversations(as_twin):
 def test_one_process_for_every_bot_each_chat_searches_its_own_twin_never_the_cached_status(home, monkeypatch):  # noqa: F811
     """gateway.multiplex_profiles: one Hermes process serves every bot, the bot in use is named per task (Hermes'
     home override), and the status is cached once for the process, with the profile of whichever chat made it."""
+    local_chat(monkeypatch)
     tr.switch("test-scout", True)
     tr.ingest_grok("test-scout", EXPORT)
     tr.switch("recipe-planner", True)
@@ -147,6 +163,13 @@ def test_the_search_tool_answers_nothing_to_a_chat_that_arrives_over_a_messaging
     for platform in ("", "cli", "tui", "desktop"):
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", platform)
         assert _search(query="sourdough")["hits"], platform
+    # a chat that names no origin at all, or Hermes' own module missing: refused (fails closed)
+    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "")
+    monkeypatch.setenv("HERMES_SESSION_SOURCE", "")
+    assert "hits" not in _search(query="sourdough")
+    monkeypatch.setitem(sys.modules, "gateway.session_context", None)
+    monkeypatch.delenv("HERMES_SESSION_SOURCE")
+    assert "hits" not in _search(query="sourdough")
 
 
 def test_bad_arguments_to_the_tool_give_a_plain_error(as_twin):
@@ -317,6 +340,7 @@ def test_a_request_from_another_computer_cannot_change_or_take_out_full_transcri
 def test_without_a_per_task_bot_the_cached_status_never_names_the_twin(home, monkeypatch):  # noqa: F811
     """A process serving every bot sits in the main folder: a chat with no per-task bot is the main bot's, whatever
     profile the cached status (or the plugin context) holds."""
+    local_chat(monkeypatch)
     tr.switch("test-scout", True)
     tr.ingest_grok("test-scout", EXPORT)
     root = home / "hermes-root"
@@ -334,6 +358,7 @@ def test_without_a_per_task_bot_the_cached_status_never_names_the_twin(home, mon
 def test_the_search_tool_fails_closed_when_the_chats_own_bot_cannot_be_told(home, monkeypatch, broken):  # noqa: F811
     """Never the process-wide profile (the cached status or the plugin context): in one process for every bot that
     can be another twin's, so without this chat's own Hermes home nothing is searched at all."""
+    local_chat(monkeypatch)
     tr.switch("test-scout", True)
     tr.ingest_grok("test-scout", EXPORT)
     monkeypatch.setattr(tools, "_svc", lambda: _Svc("test-scout", PAIRS))  # the process-wide answer names a twin
@@ -351,6 +376,7 @@ def test_the_search_tool_fails_closed_when_the_chats_own_bot_cannot_be_told(home
 
 
 def test_without_a_per_task_bot_the_search_uses_the_processs_own_home_never_the_cached_status(home, monkeypatch):  # noqa: F811
+    local_chat(monkeypatch)
     tr.switch("test-scout", True)
     tr.ingest_grok("test-scout", EXPORT)
     monkeypatch.setattr(tools, "_svc", lambda: _Svc("test-scout", PAIRS))  # cached status: the other bot's

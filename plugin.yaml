@@ -1,6 +1,6 @@
 name: grok-bot-twin
 label: Grok Bot Twin
-version: "0.3.3"
+version: "0.3.4"
 description: >-
   Give your Grok bots a twin in Hermes. A twin is a Hermes bot that follows a bot from the Grok desktop app;
   your Grok bot stays exactly as it is. Name and description changes reach the twin
@@ -106,34 +106,28 @@ description: >-
   that page (the terminal commands cannot reach that storage).
   Requests between your computers (off by default): only on a computer where you switch on "Let my other
   computers ask this one to do things" (one switch per computer), the plugin also fetches, over the link above
-  and with the same per-computer key, requests your other linked computers send ("do X on Surface", the
-  twin_ask_machine tool or hermes twin ask), runs each as ONE ordinary chat turn of the twin's own Hermes bot by
+  and with the same per-computer key, requests you send from your other linked computers (/twin ask or
+  hermes twin ask, typed by you; there is no model tool for it), runs each as ONE ordinary chat turn of the twin's own Hermes bot by
   using this computer's own Hermes (attached to the Hermes that is already running through Hermes' own client,
   by the small program twin/turn_bridge.py; else python -m tui_gateway.entry, Hermes' interface for programs; else
   hermes -p BOT chat -Q --query-file - with the request on standard input; no flag or variable that changes this
   computer's approval rules), where a step that needs approval waits for YOU on that computer (it shows the
   step; you answer once or deny there; no other computer can answer, and unanswered means not done; on that
-  computer only you may instead choose "Let my own linked computers approve", which shows the step to the one
-  computer that asked and takes its signed answer for that one step, or "Only safe requests", which refuses
-  such steps at once), sends back
-  only the twin's answer (password-like text masked, capped; under that second choice also the text of the
-  step that waits), and keeps a log of every request on both
+  computer only you may instead choose "Only safe requests", which refuses such steps at once), sends back
+  only the twin's answer (password-like text masked, capped), and keeps a log of every request on both
   computers (2,000 characters a request, 6 a minute and 40 an hour; one more background thread while it is on;
   switching it off stops a running request, on Windows with taskkill.exe by process id from the system folder,
   where a program that request had already started can run on to its own end).
-  Two skills ship with the plugin: set-up-grok-bot-twin, a text file that walks you through hermes twin setup in
-  a chat, and finish-twins-in-grok, a text file Hermes follows when you choose "Let Hermes do the Grok part".
-  While the plugin is on, the model sees each skill's name and one line about it, and its text when you
-  or the model ask for it; they hold steps and rules only and nothing of yours. hermes twin setup --check and --plan
+  One skill ships with the plugin: set-up-grok-bot-twin, a text file that walks you through hermes twin setup in
+  a chat. While the plugin is on, the model sees the skill's name and one line about it, and its text when you
+  or the model ask for it; it holds steps and rules only and nothing of yours. hermes twin setup --check and --plan
   change nothing and never run botport; a run you said yes to may take the botport download it found in your
   Downloads folder by its exact name (the same as Use it on the Twins page).
   After you twin several bots, the sheet for them can watch your Downloads folder for their setup exports (only
   after Do all ticked now, while that sheet is open, at most 15 minutes): it lists that one folder and reads new
   .json, .txt or .md files up to 2 MB, imports what is a grok-bot-export for a ticked twin (memories and facts
   about you left out) and keeps only digests of the files it used. It can also set the model you chose in each
-  ticked twin's config.yaml. The pre_tool_call hook does nothing unless you start "Let Hermes do the Grok part";
-  then, for 30 minutes at most, it makes Hermes ask before every computer_use step and refuses anything outside
-  the Grok app, the ticked bots' chats and the request text.
+  ticked twin's config.yaml. Nothing clicks in the Grok app: you paste the request into each bot yourself.
 author: Josh Hudson
 license: MIT
 homepage: https://github.com/hudsonwa/twin
@@ -144,13 +138,11 @@ tags: [grok, twin, migration, import, sync, desktop]
 provides_tools:
   - twin_status
   - twin_recent
-  - twin_ask_machine
   - twin_transcripts_search
 provides_hooks:
   - pre_llm_call
   - on_session_start
   - on_session_end
-  - pre_tool_call
 capabilities: []
 requires_env: []
 emits: [synced, secrets_withheld, conflict, changed, created, removed, resolved, restored, instructions, approved,

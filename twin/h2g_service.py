@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from . import config, h2g, h2g_mirror, hermes_side as hs, importer, skill_sync, store
+from . import config, h2g, h2g_mirror, hermes_side as hs, importer, skill_sync
 from .engine import EngineError
 from .model import ago, now_iso, valid_id
 
@@ -221,8 +221,8 @@ class H2GMixin:
             return not on
         for j in mine:
             if _enabled(j) != on:
-                fn = importer.resume_cron if on else importer.pause_cron
-                fn(importer._job_id(j), prof, getattr(self, "ctx", None))
+                # (not resume_cron: its guard refuses a routine that runs in Grok, and this IS the move back)
+                importer._cron_action("resume" if on else "pause", importer._job_id(j), prof, getattr(self, "ctx", None))
         _, _, after = self._h2g_jobs(pid)
         return all(_enabled(j) == on for j in after if h2g.routine_key(str(j.get("name") or "")) == rkey)
 
@@ -288,15 +288,13 @@ class H2GMixin:
             return
         way_on = {"routines": "hermes_to_grok"}
         way_off = {"routines": "off"}
-        with sync_panel._lock, store.locked():
-            f = sync_panel._read()
+        with sync_panel.edit() as f:
             t = f["twins"].setdefault(pid, {})
             for item, ways in ((i, (way_on, "both")) for i in allowed):
                 t[item] = {"direction": ways[0].get(item, ways[1]), "at": now_iso()}
             for item in stopped:
                 if (t.get(item) or {}).get("direction") in ("both", "hermes_to_grok"):
                     t[item] = {"direction": way_off.get(item, "grok_to_hermes"), "at": now_iso()}
-            store.atomic_write_json(sync_panel._path(), f)
 
     def to_grok_disallow(self, pid: Any, items: Any = "all") -> dict:
         """Stopping is always allowed (also from a chat): it only ever takes changes back."""

@@ -18,7 +18,7 @@ import pytest
 
 from twin_testlib import central, config, home, service  # noqa: F401
 from hermes_plugins.grok_bot_twin.twin import fleet, fleet_follow as follow, fleet_io as fio
-from hermes_plugins.grok_bot_twin.twin import fleet_profiles as fp, tasks, tasks_api, tasks_hub, tasks_run
+from hermes_plugins.grok_bot_twin.twin import fleet_profiles as fp, slash, tasks, tasks_api, tasks_hub, tasks_run
 
 SRC = {"id": "m-3f9a1c0b7d2e", "name": "mini", "platform": "macos"}
 ME, OTHER = "m-77aa01bc9d10", "m-0123456789ab"
@@ -444,49 +444,31 @@ def test_numbers_that_are_not_numbers_are_not_believed(home):  # noqa: F811
         assert (status, obj["error"]["code"]) == (400, "clock_off"), at
 
 
-def test_the_tool_does_not_ask_for_a_messaging_chat_or_for_a_request_that_came_from_elsewhere(home, tmp_path, monkeypatch):  # noqa: F811
+def test_asking_is_refused_for_a_messaging_chat_and_for_a_request_that_came_from_elsewhere(home, tmp_path, monkeypatch):  # noqa: F811
     """Two ways to make the owner's computers do things without the owner at one of them: write to the twin
-    through a messaging app (or have it read text there) so that its model calls the tool; or send a request
-    whose text makes the asked twin ask a third computer. Both are refused before anything is sent."""
+    through a messaging app (or have it read text there); or send a request whose text makes the asked twin ask a
+    third computer. Both are refused before anything is sent. (There is no model tool for asking: test_c2_f5.py.)"""
     _linked(home, tmp_path)
     _apply(_list([_twin(T1, "Test Scout", "Finds trails.")]))
     sent = []
     monkeypatch.setattr(tasks_run, "_call", lambda *a, **k: sent.append(a) or (_ for _ in ()).throw(follow.Unreachable()))
     monkeypatch.setattr(tasks_run, "_ask_rate", tasks.Rate(per_min=100, per_hour=1000))  # (not what is tested)
-    args = {"machine": "mini", "request": "delete the build folder", "twin": "Test Scout"}
     # a chat on this computer: it is sent (and here finds nobody there)
-    out = json.loads(tasks_api.twin_ask_machine(args))
-    assert len(sent) == 1 and out["error"]["code"] == "tasks_unreachable"
-    # the same call from a chat that arrives over a messaging app, a webhook or the API server
-    for platform in ("telegram", "discord", "slack", "whatsapp", "api_server", "webhook", "email", "anything-new"):
-        monkeypatch.setenv("HERMES_SESSION_PLATFORM", platform)
-        out = json.loads(tasks_api.twin_ask_machine(args))
-        assert out["label"] == "not sent" and out["error"]["code"] == "local_only", platform
-        assert json.loads(tasks_api.twin_ask_machine({"check": "k-0123456789abcdef"}))["error"]["code"] == "local_only"
-    monkeypatch.delenv("HERMES_SESSION_PLATFORM")
-    # HERMES_GATEWAY_SESSION does not mean "messaging": Hermes sets it in the process behind its own terminal UI
-    # and Desktop as well (taking it for messaging refused the tool in every
-    # chat there). A chat on this computer is sent with or without it
-    for mark in ("1", None):
-        if mark:
-            monkeypatch.setenv("HERMES_GATEWAY_SESSION", mark)
-        else:
-            monkeypatch.delenv("HERMES_GATEWAY_SESSION")
-        for platform in ("", "cli", "tui", "desktop", "local"):
-            monkeypatch.setenv("HERMES_SESSION_PLATFORM", platform)
-            assert json.loads(tasks_api.twin_ask_machine(args))["error"]["code"] == "tasks_unreachable", platform
-        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")  # ...and a messaging chat is refused either way
-        assert json.loads(tasks_api.twin_ask_machine(args))["error"]["code"] == "local_only"
-        monkeypatch.delenv("HERMES_SESSION_PLATFORM")
-    assert len(sent) == 11
+    assert "Hermes could not reach mini." in slash.handle("ask mini: delete the build folder", platform="desktop")
+    assert len(sent) == 1
+    # the same from a chat that arrives over a messaging app, a webhook or the API server, or names no platform
+    for platform in ("telegram", "discord", "slack", "whatsapp", "api_server", "webhook", "email", "anything-new",
+                     "", None):
+        assert slash.handle("ask mini: delete the build folder", platform=platform).startswith(
+            "From a messaging chat"), platform
+    assert len(sent) == 1
     # the chat turn of a request from another computer is marked, and a marked turn cannot ask onward
     env = tasks_run.turn_env()
     assert env[tasks_run.ASKED_ENV] == "1" and tasks_run.ASKED_ENV not in os.environ
     assert not any(k in env for k in tasks_run.SCRUB_ENV)  # nothing that would switch approvals off rides along
     assert "--yolo" not in " ".join(tasks_run.CHAT_WORDS) and "yolo" not in json.dumps(env).lower()
     monkeypatch.setenv(tasks_run.ASKED_ENV, "1")
-    out = json.loads(tasks_api.twin_ask_machine(args))
-    assert out["label"] == "not sent" and out["error"]["code"] == "passed_on" and len(sent) == 11
+    assert "not passed on to a third" in slash.handle("ask mini: hello", platform="desktop") and len(sent) == 1
     with pytest.raises(tasks.TaskError) as exc:
         service.get_service().tasks_ask("mini", "hello", "Test Scout")
     assert exc.value.code == "passed_on"
@@ -577,10 +559,9 @@ def test_a_request_cannot_approve_its_own_step(home, tmp_path, monkeypatch):  # 
     monkeypatch.delenv(tasks.ASKED_ENV)
     svc.tasks_approve(tid, "once", q)  # the owner, in a terminal or on the page of this computer
     assert tasks.decision(tid) == "once"
-    # nothing on the wire approves by default: what the asked computer reports about a waiting step carries no
-    # command and no choice. (Two more routes exist for a step the ASKED computer chose to show the asking one,
-    # "Let my own linked computers approve": tests/test_tasks_approval_modes.py. Not offered, not answerable.)
-    assert tasks_hub.ROUTES[:4] == ("/v1/task/ask", "/v1/task/wait", "/v1/task/poll", "/v1/task/update")
+    # nothing on the wire approves: what the asked computer reports about a waiting step carries no command and
+    # no choice, and there is no route to answer a step from another computer (test_c2_f5.py)
+    assert tasks_hub.ROUTES == ("/v1/task/ask", "/v1/task/wait", "/v1/task/poll", "/v1/task/update")
     hub = tasks_hub.Hub()
     st = _sharing_state()
     surface, orchard = {"id": ME, "name": "Surface"}, {"id": OTHER, "name": "Orchard"}
@@ -594,7 +575,4 @@ def test_a_request_cannot_approve_its_own_step(home, tmp_path, monkeypatch):  # 
     # the asking computer cannot move the request on by itself: only the asked one reports on it
     assert hub.update(orchard, {"id": wire_id, "state": "done", "reply": "it is done"})[0] == 404
     assert hub.update(orchard, {"id": wire_id, "state": "running"})[0] == 404
-    assert hub.tasks[wire_id]["state"] == "waiting_approval"
-    assert hub.answer(orchard, {"id": wire_id, "q": "0a0b0c0d", "choice": "once"})[1]["error"]["code"] == "approve_there"
-    assert hub.answer(surface, {"id": wire_id, "q": "0a0b0c0d", "choice": "once"})[0] == 404
-    assert hub.tasks[wire_id]["answer"] is None
+    assert hub.tasks[wire_id]["state"] == "waiting_approval" and "answer" not in hub.tasks[wire_id]

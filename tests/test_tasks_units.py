@@ -16,8 +16,8 @@ import fleet_testlib
 from fleet_testlib import shape_problems
 from tasks_testlib import calls, install_fake_hermes
 from twin_testlib import ROOT, config, home, service, slash, timer  # noqa: F401
-from hermes_plugins.grok_bot_twin.twin import (fleet, fleet_io as fio, fleet_server, store, tasks, tasks_api,
-                                               tasks_hub, tasks_run)
+from hermes_plugins.grok_bot_twin.twin import (fleet, fleet_io as fio, fleet_server, store, tasks, tasks_hub,
+                                               tasks_run)
 
 fleet_testlib._SHAPES.update(json.loads((ROOT / "tests" / "contract" / "tasks_shapes.json").read_text("utf-8"))["shapes"])
 
@@ -474,20 +474,20 @@ def test_asking_without_a_reachable_computer_is_a_plain_logged_refusal(linked):
         linked.tasks_check("k-0000000000000000")
     # /twin ask and /twin requests say the same in a chat
     linked.ctx = type("Ctx", (), {"profile_name": "test-scout"})()
-    text = slash.handle("ask mini: how much disk space is free?")
+    text = slash.handle("ask mini: how much disk space is free?", platform="cli")
     assert text.splitlines()[0] == "not done: mini could not be reached" and "Hermes could not reach mini." in text
-    assert "Say which computer" in slash.handle("ask")
-    assert "Say which computer" in slash.handle("ask mini")
-    assert slash.handle("ask laptop: hi").startswith("Grok Bot Twin: None of your linked computers is called laptop.")
+    assert "Say which computer" in slash.handle("ask", platform="cli")
+    assert "Say which computer" in slash.handle("ask mini", platform="cli")
+    assert slash.handle("ask laptop: hi", platform="cli").startswith("Grok Bot Twin: None of your linked computers is called laptop.")
     assert "only shows status" in slash.handle("ask mini: hi", platform="telegram")  # never from a messaging chat
-    assert '"Let my other computers ask this one to do things" is off on Surface.' in slash.handle("requests")
+    assert '"Let my other computers ask this one to do things" is off on Surface.' in slash.handle("requests", platform="cli")
 
 
 def test_the_request_log_is_not_shown_in_a_chat_that_arrives_through_a_messaging_app(linked):
     """The log holds the first words of what was asked and answered. `/twin requests` shows it in a chat on this
     computer only, like `/twin ask`."""
     tasks.log_entry("out", "k-00000000000000e2", "mini", "Test Scout", "tidy up the notes", "waiting_approval")
-    here = slash.handle("requests")
+    here = slash.handle("requests", platform="cli")
     assert "tidy up the notes" in here and "to mini" in here
     assert "tidy up the notes" in slash.handle("requests", platform="desktop")
     for platform in ("telegram", "discord", "webhook", "api_server"):
@@ -807,16 +807,17 @@ def test_a_request_turn_is_known_by_its_chat_even_inside_a_hermes_that_was_alrea
             linked.tasks_ask("mini", "pass it on", twin="Test Scout")
         assert exc.value.code == "passed_on"
         monkeypatch.delenv(var)
-    # the tool, called inside the running Hermes for that chat: Hermes' own per-chat value says which chat it is
+    # inside the running Hermes for that chat: Hermes' own per-chat value says which chat it is
     ctx = types.ModuleType("gateway.session_context")
     ctx.get_session_env = lambda name, default="": chat if name == "HERMES_SESSION_ID" else default
     monkeypatch.setitem(sys.modules, "gateway.session_context", ctx)
     linked.ctx = type("Ctx", (), {"profile_name": "test-scout"})()
-    out = json.loads(tasks_api.twin_ask_machine({"machine": "mini", "request": "pass it on"}))
-    assert out["label"] == "not sent" and out["error"]["code"] == "passed_on"
+    assert tasks.asked_turn() is True
+    with pytest.raises(tasks.TaskError) as exc:
+        linked.tasks_ask("mini", "pass it on", twin="Test Scout")
+    assert exc.value.code == "passed_on"
     monkeypatch.delitem(sys.modules, "gateway.session_context")
-    out = json.loads(tasks_api.twin_ask_machine({"machine": "mini", "request": "x"}, session_id=chat))
-    assert out["error"]["code"] == "passed_on"
+    assert tasks.asked_turn([chat], in_chat=True) is True
     # when the turn ends the mark goes; a mark left by a Hermes that died is forgotten after an hour
     tasks.mark_turn([chat], False)
     monkeypatch.setenv("HERMES_SESSION_ID", chat)
@@ -840,8 +841,7 @@ def test_a_request_turn_is_known_by_its_chat_even_inside_a_hermes_that_was_alrea
     assert tasks.asked_turn() is False
     tasks.decide(tid, "once")
     tasks.set_pending(tid, {"command": "rm -rf ./x", "description": "recursive delete"})
-    out = json.loads(tasks_api.twin_ask_machine({"machine": "mini", "request": "x"}))
-    assert out["error"]["code"] == "passed_on"
+    assert tasks.asked_turn(in_chat=True) is True
     monkeypatch.setenv("HERMES_SESSION_ID", "local-" + "ef56" * 16)  # any chat, not only a marked one
     assert tasks.asked_turn() is True
     with pytest.raises(tasks.TaskError) as exc:
@@ -851,8 +851,7 @@ def test_a_request_turn_is_known_by_its_chat_even_inside_a_hermes_that_was_alrea
     assert tasks._single_since()
     tasks.mark_single(False)
     assert tasks._single_since() is None and tasks.asked_turn() is False
-    out = json.loads(tasks_api.twin_ask_machine({"machine": "mini", "request": "x"}))
-    assert out.get("error", {}).get("code") != "passed_on"
+    assert tasks.asked_turn(in_chat=True) is False
     tasks.mark_single(True)
     monkeypatch.setattr(tasks, "RUN_LIMIT_S", -61)  # a mark left by a turn that died is forgotten by itself
     assert tasks._single_since() is None

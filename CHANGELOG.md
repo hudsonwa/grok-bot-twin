@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.4 (12 November 2026)
+
+Smaller and safer: the fixes from the cycle-2 review, mostly by removing code (about 1,300 fewer product lines).
+
+- Removed "Let Hermes do the Grok part" (Hermes clicking in the Grok app). Its guard stopped protecting a chat once
+  its 30 minutes ran out, and it was never run against the real Grok app. Bringing instructions over stays as it
+  was: `hermes twin finish --all` prints the request you paste into each bot, and `import-exports` reads the answers.
+- Removed the model tool `twin_ask_machine`: a chat can no longer start a request on another computer. You still can,
+  with `/twin ask`, `hermes twin ask` or the Twins page. `hermes twin ask` refuses a command that a chat started.
+- Removed the approval mode "Let my own linked computers approve". A stored choice now reads as "Ask on this
+  computer". `/twin` and the request checks refuse a chat whose platform is missing or unknown.
+- One password-and-key check for everything (memory, setup exports, instructions, Hermes to Grok). Short
+  `NAME=value` passwords such as `DB_PASSWORD=hunter2` are now caught on the way to Grok. Ordinary instruction text
+  ("Passwords must have at least 8 characters") is not held.
+- A twin with an instructions or Hermes to Grok conflict no longer says "Up to date": it says it needs you and
+  which item to choose, in the terminal, in `/twin` and on the Twins page.
+- Stop twinning now also withdraws the twin's Hermes to Grok permission (the Mirror's allow list no longer names the
+  bot) and switches off its memory layers.
+- "Move routines to Hermes" refuses a routine that runs in Grok (or is being moved), so a routine never runs in
+  both places.
+- Fixed a rare hang when the Mirror's answer and a What syncs change arrived together. Moving a routine between
+  Hermes and Grok no longer holds the plugin's lock while `hermes cron` runs.
+- No background thread before you have a twin (or share or link a computer); the threads end when nothing is left.
+  A round checks and syncs by default; the optional parts run only while they are on, and one failing part no
+  longer holds up or slows the others.
+- One place talks to Hermes' own code (`twin/config.py`). The checks "is this chat local?" and "is this skill safe?"
+  refuse when Hermes cannot answer. A Hermes routines file (`cron/jobs.json`) in a shape the plugin does not know is
+  left alone with a clear message, instead of being read as empty and written over.
+
 ## 0.3.3 (12 November 2026)
 
 - Installs from GitHub again without `--force`: Hermes' install scan stopped the install because three source

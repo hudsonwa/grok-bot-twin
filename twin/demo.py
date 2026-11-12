@@ -559,7 +559,7 @@ class DemoEngine(Engine):
 
     def _scan_preview(self, gid: str, name: str, text: str) -> Optional[str]:
         """Write the skill as it would be imported and run Hermes' own skill scanner on it."""
-        from .importer import scan_skill_dir
+        from .config import skill_scan as scan_skill_dir
         try:
             d = store.ensure_dir(self._p("preview-skills", gid, _slug(name)))
             store.atomic_write_text(d / "SKILL.md", f"---\nname: {_slug(name)}\ndescription: Imported from a "

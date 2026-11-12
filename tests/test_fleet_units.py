@@ -689,7 +689,7 @@ def test_a_chat_with_a_mirrored_twin_knows_it_is_a_copy_without_any_name(home, t
     tool = json.loads(tools.twin_status({}))
     assert tool["twins"] == [] and "hint" not in tool and tool["mirrored"]["copies_on_this_computer"] == 1
     assert tool["mirrored"]["state"] == "being set up" and "Test Scout" not in json.dumps(tool) and "mini" not in json.dumps(tool)
-    said = slash.handle("status")
+    said = slash.handle("status", platform="cli")
     assert "Surface follows mini" in said and "Test Scout: on mini, Surface" in said and "Connect my Grok bots" not in said
     with service.store.locked():
         st = fleet.load()

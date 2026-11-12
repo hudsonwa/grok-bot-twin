@@ -13,19 +13,8 @@ sharing computer itself shows the instance secret instead, which only that compu
 - `/v1/task/poll`    {"proto", "accept": bool, "wait_s"}                 -> {"task": {"id", "from", "twin", "text"} | null}
 - `/v1/task/update`  {"proto", "id", "state", "code"?, "seconds"?, "reply"?} -> {"ok": true}
 
-A step that waits for approval on the asked computer is answered on that computer (tasks.decide). `update` says
-"waiting_approval" and, by default, nothing about what waits. Only when the ASKED computer's owner chose "Let my
-own linked computers approve" there (tasks.mode; no route here can set it) does its `update` carry the question
-(`ask`: the mark, the step as shown there), and then two more routes exist for that one question:
-
-- `/v1/task/answer`    {"proto", "id", "q", "choice": "once"|"deny"}      -> {"ok": true}       (the asker only)
-- `/v1/task/answered`  {"proto", "id", "q", "wait_s"}                      -> {"answer": {"q", "choice", "by"} | null}
-                                                                                              (the asked computer only)
-
-The mailbox keeps such an answer only for the question whose mark it names, only from the computer that asked
-that very request (who signed, never what the body says), only while that question is open, and hands it to
-nobody but the asked computer, which checks all of it again by its own files before it counts (tasks_run.py).
-A request that was not offered this way cannot be answered here at all.
+A step that waits for approval on the asked computer is answered on that computer only (tasks.decide). `update`
+says "waiting_approval" and nothing about what waits.
 
 What the mailbox does and does not do:
 
@@ -60,7 +49,6 @@ MAX_TASKS = 64
 MISSED_CAP = 20  # refused requests remembered per computer until it hears of them
 WIRE_STATES = ("running", "waiting_approval") + tasks.END_STATES
 NOT_APPROVED = ("approval_denied", "approval_timeout", "only_safe")
-ANSWERED_WAIT_S = 25
 
 
 def _err(status: int, code: str) -> tuple:
@@ -121,7 +109,7 @@ class Hub:
                 self._end(t, "timeout", "task_timeout")
 
     def _end(self, t: dict, state: str, code: Optional[str] = None, reply: str = "", seconds: Any = None) -> None:
-        t.update(state=state, code=code, reply=reply, ended=time.monotonic(), approval=None, answer=None)
+        t.update(state=state, code=code, reply=reply, ended=time.monotonic())
         # (what the asked computer says, when it is a believable number: finite, from 0 to a day)
         t["seconds"] = seconds if tasks.whole_seconds(seconds) is not None else round(t["ended"] - t["asked"], 1)
         if t.get("relay"):
@@ -237,8 +225,7 @@ class Hub:
             self.tasks[tid] = {"id": tid, "from": {"id": frm["id"], "name": frm["name"]}, "to": to,
                                "to_name": known[to]["name"], "twin": twin, "text": clean, "state": "queued",
                                "code": None, "reply": "", "seconds": None, "asked": time.monotonic(),
-                               "asked_at": now_iso(), "ended": 0.0, "taken": False, "relay": relay,
-                               "approval": None, "answer": None}
+                               "asked_at": now_iso(), "ended": 0.0, "taken": False, "relay": relay}
             if relay:
                 tasks.log_entry("relay", tid, frm["name"], peer_to=known[to]["name"])
             self.cond.notify_all()
@@ -262,8 +249,6 @@ class Hub:
                 if t["ended"] or left <= 0 or self.closing or (seen is not None and t["state"] != seen) \
                         or (seen is None and t["state"] == "waiting_approval"):
                     out = {"id": t["id"], "state": t["state"]}
-                    if t["state"] == "waiting_approval" and t.get("approval") and not t.get("answer"):
-                        out["approval"] = dict(t["approval"])  # only ever to the computer that asked (above)
                     if t["code"]:
                         out["code"] = t["code"]
                     if t["ended"]:
@@ -335,68 +320,9 @@ class Hub:
                     code = code if code in NOT_APPROVED else None
                 self._end(t, state, code if state == "done" else (code or "task_failed"), reply, body.get("seconds"))
             else:
-                # The question travels only when the asked computer sends it (`ask`), and lives exactly as long
-                # as that computer says the step waits: any other state, or a new `ask`, drops it and whatever
-                # answer was given to it. A mere look ("still waiting", no `ask` key) changes nothing.
-                if state != "waiting_approval":
-                    t.update(approval=None, answer=None)
-                elif "ask" in body or t["state"] != "waiting_approval":
-                    shown = tasks.clean_question(body.get("ask"))
-                    same = shown is not None and t.get("approval") is not None and shown["q"] == t["approval"]["q"]
-                    if not same:  # (the same question told twice, after a lost answer, keeps what was answered)
-                        t.update(approval=shown, answer=None)
                 t.update(state=state, code=None)
                 self.cond.notify_all()
         return _ok({"ok": True})
-
-    def answer(self, who: dict, body: dict) -> tuple:
-        """The computer that ASKED a request answers the question its asked computer showed it. Kept for the
-        asked computer to fetch; nothing is decided here."""
-        tid, q, choice = body.get("id"), body.get("q"), body.get("choice")
-        if choice not in tasks.CHOICES or not isinstance(q, str) or not tasks.MARK_RE.fullmatch(q):
-            return _err(400, "bad_request")
-        with self.cond:
-            self._expire()
-            t = self.tasks.get(tid) if isinstance(tid, str) else None
-            if t is None or t["from"]["id"] != who["id"] or t["to"] == who["id"]:
-                return _err(404, "unknown_task")  # not this computer's request (or not a request at all)
-            if t["ended"]:
-                return _err(404, "unknown_task")
-            a = t.get("approval")
-            if t["state"] != "waiting_approval" or not a:
-                # nothing was offered: the step (if one waits) is answered on the asked computer only
-                return _err(409, "approve_there" if t["state"] == "waiting_approval" else "step_changed")
-            if t.get("answer") or not hmac.compare_digest(q.encode("utf-8"), a["q"].encode("utf-8")):
-                return _err(409, "step_changed")  # another step by now, or answered already: the first stands
-            t["answer"] = {"q": a["q"], "choice": choice}
-            if t.get("relay"):
-                tasks.log_answered("relay", t["id"], choice, t["from"]["name"])
-            self.cond.notify_all()
-        return _ok({"ok": True})
-
-    def answered(self, who: dict, body: dict) -> tuple:
-        """The ASKED computer looks (held) for the answer to the question it showed. Only for its own request
-        and only for the mark that is open; the answer names who gave it: the computer that asked."""
-        tid, q = body.get("id"), body.get("q")
-        wait_s = body.get("wait_s")
-        wait_s = min(ANSWERED_WAIT_S, max(0, wait_s)) if isinstance(wait_s, (int, float)) \
-            and not isinstance(wait_s, bool) else 0
-        deadline = time.monotonic() + wait_s
-        with self.cond:
-            while True:
-                t = self.tasks.get(tid) if isinstance(tid, str) else None
-                if t is None or t["to"] != who["id"]:
-                    return _err(404, "unknown_task")
-                a, ans = t.get("approval"), t.get("answer")
-                if t["ended"] or not a or not isinstance(q, str) or a["q"] != q:
-                    return _ok({"answer": None, "open": False})
-                if ans and ans["q"] == a["q"]:
-                    return _ok({"answer": {"q": ans["q"], "choice": ans["choice"],
-                                           "by": {"id": t["from"]["id"], "name": t["from"]["name"]}}})
-                left = deadline - time.monotonic()
-                if left <= 0 or self.closing:
-                    return _ok({"answer": None, "open": True})
-                self.cond.wait(min(left, 5.0))
 
     def forget(self, mid: str) -> None:
         """A computer was unlinked: what it asked and what was asked of it ends."""
@@ -517,8 +443,7 @@ def caller(st: dict, asked: Any, bearer: str, secret: str) -> tuple:
     return {"id": m["id"], "name": m["name"], "local": False}, (key, asked.nonce)
 
 
-ROUTES = ("/v1/task/ask", "/v1/task/wait", "/v1/task/poll", "/v1/task/update", "/v1/task/answer",
-          "/v1/task/answered")
+ROUTES = ("/v1/task/ask", "/v1/task/wait", "/v1/task/poll", "/v1/task/update")
 
 
 def handle(path: str, asked: Any, bearer: str, body: dict, secret: str,
@@ -552,10 +477,6 @@ def handle(path: str, asked: Any, bearer: str, body: dict, secret: str,
         out = hub.wait(who, body)
     elif path == "/v1/task/poll":
         out = hub.poll({**who, "gone": gone} if gone is not None else who, body)
-    elif path == "/v1/task/answer":
-        out = hub.answer(who, body)
-    elif path == "/v1/task/answered":
-        out = hub.answered(who, body)
     else:
         out = hub.update(who, body)
     return out + (signed,)

@@ -1448,9 +1448,7 @@ _lock = threading.Lock()
 
 def tick(force: bool = False) -> None:
     """One look, on either kind of computer. Never raises."""
-    try:
-        if not fleet.exists() or not exists():
-            return
+    try:  # (without the files, both tend_* stop at their first look)
         st = fleet.load()
         if st.get("link"):
             tend_linked()
@@ -1460,22 +1458,26 @@ def tick(force: bool = False) -> None:
         log.debug("grok-bot-twin: the routines look failed", exc_info=True)
 
 
+def _has_work() -> bool:
+    """Work for the half-minute look: routines switched on where they come from, or arrived here (as tend_*)."""
+    if not fleet.exists() or not exists():
+        return False
+    st, R = fleet.load(), load()
+    if st.get("link"):
+        return bool(R["dst"] and R["dst"].get("items"))
+    return bool(st.get("share")) and (R["src"] is not None or R["on"] is True)
+
+
 def _loop() -> None:
-    while not _stop.wait(TICK_S):
-        tick()
+    while not _stop.wait(TICK_S) and _has_work():
+        tick()  # (the thread ends with nothing left to look after; the background check starts it again when needed)
 
 
 def ensure_started() -> None:
-    """Start the half-minute look once per process, on a computer that shares or is linked and where routines
-    were ever switched on or heard of (one small file otherwise, and no thread)."""
+    """Start the half-minute look once per process, only while it has work: no thread otherwise."""
     global _thread
     with _lock:
-        if _stop.is_set() or (_thread is not None and _thread.is_alive()):
-            return
-        try:
-            if not exists():
-                return
-        except OSError:
+        if _stop.is_set() or (_thread is not None and _thread.is_alive()) or not _has_work():
             return
         _thread = threading.Thread(target=_loop, name="grok-bot-twin-routines", daemon=True)
         _thread.start()

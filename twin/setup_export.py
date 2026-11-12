@@ -122,11 +122,6 @@ _UNSEEN = _chars(0xAD, 0x34F, 0x61C, (0x115F, 0x1160), (0x17B4, 0x17B5), 0x180E,
 # Variation selectors change how the character before them is drawn (an emoji in colour, a variant of an
 # ideograph, a Mongolian letter shape). They stay in the text; the password-and-key check reads without them.
 _SELECTORS = _chars((0x180B, 0x180D), 0x180F, (0xFE00, 0xFE0F), (0xE0100, 0xE01EF))
-# a private key block of any kind and in any case (PGP's too), up to its end line or the end of the text
-_KEY_BLOCK = re.compile(r"-----\s*BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----.*?"
-                        r"(?:-----\s*END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----|\Z)", re.I | re.S)
-# (the dashes are part of it: a sentence that says "begin ... private key" is not a key)
-_KEY_WORDS = re.compile(r"-{2,}\s*BEGIN [A-Z0-9 ]*PRIVATE KEY", re.I)
 
 
 def _now() -> float:
@@ -196,7 +191,7 @@ def _grew(text: str, plain: str) -> bool:
 
 def _looks_secret(text: str) -> bool:
     plain = _plain_form(text)
-    return _grew(text, plain) or _secrets.has_secret(plain) or bool(_KEY_WORDS.search(plain))
+    return _grew(text, plain) or _secrets.has_secret(plain)
 
 
 def _one_line(value: Any, cap: int) -> str:
@@ -277,9 +272,6 @@ def screen_instructions(raw: Any) -> dict:
         return {**out, "state": "held", "why": MARKER_WHY}
     lines = text.split("\n")
     flagged = _secrets.flagged_lines(plain)
-    for m in _KEY_BLOCK.finditer(plain):
-        first = plain.count("\n", 0, m.start()) + 1
-        flagged.update(range(first, first + m.group(0).count("\n") + 1))
     if len(flagged) > LEFT_OUT_MAX:  # (the list of line numbers the owner is shown is always the whole list)
         return {**out, "state": "held", "why": ALL_HELD_WHY}
     kept = [ln for i, ln in enumerate(lines) if i + 1 not in flagged]

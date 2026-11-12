@@ -75,7 +75,7 @@ def _hermes_made_it_again(prof, soul: bool = True) -> None:
 # ---- linking again brings the same Hermes bot back, once ----------------------------------------------------------
 def test_linking_again_puts_the_kept_bot_back_under_its_own_name_and_sets_hermes_leftover_aside(
         home, tmp_path, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(fp, "_hermes_default_soul", lambda text: text == HERMES_SOUL)
+    monkeypatch.setattr(fp.config, "hermes_default_soul", lambda text: text == HERMES_SOUL)
     svc = _linked(home, tmp_path)
     assert _apply(_list([SCOUT, QUILL]))["added"] == 2
     scout = home / "profiles" / "test-scout"
@@ -251,7 +251,7 @@ def test_a_twin_sent_to_a_second_name_gets_it_freed_too_and_the_sentence_is_said
 
 @pytest.mark.parametrize("what", ["config", "chat", "prompt", "memory", "job", "link", "skill", "session", "unreadable"])
 def test_a_folder_with_anything_of_the_owners_is_never_set_aside(home, tmp_path, monkeypatch, what):  # noqa: F811
-    monkeypatch.setattr(fp, "_hermes_default_soul", lambda text: text == HERMES_SOUL)
+    monkeypatch.setattr(fp.config, "hermes_default_soul", lambda text: text == HERMES_SOUL)
     svc = _linked(home, tmp_path)
     _apply(_list([SCOUT]))
     _relink(home, tmp_path)
@@ -300,7 +300,7 @@ def test_a_folder_with_anything_of_the_owners_is_never_set_aside(home, tmp_path,
 def test_a_twin_whose_bot_was_deleted_here_is_made_again_where_it_was(home, tmp_path, monkeypatch):  # noqa: F811
     """The twin's Hermes bot is deleted on this computer while Hermes is open; Hermes makes the folder again
     before the next look at the list. The twin is made again under its own name, not beside that folder."""
-    monkeypatch.setattr(fp, "_hermes_default_soul", lambda text: text == HERMES_SOUL)
+    monkeypatch.setattr(fp.config, "hermes_default_soul", lambda text: text == HERMES_SOUL)
     svc = _linked(home, tmp_path)
     _apply(_list([SCOUT, QUILL]))
     scout = home / "profiles" / "test-scout"
@@ -336,7 +336,7 @@ def test_the_name_hermes_shows_for_a_twin_under_a_numbered_folder():
 
 
 def test_keep_this_bot_also_gets_its_old_name_back(home, tmp_path, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(fp, "_hermes_default_soul", lambda text: text == HERMES_SOUL)
+    monkeypatch.setattr(fp.config, "hermes_default_soul", lambda text: text == HERMES_SOUL)
     svc = _linked(home, tmp_path)
     _apply(_list([SCOUT]))
     assert _apply(_list([], removed=[{"id": T1, "removed_at": "2000-01-02T09:00:00Z"}], rev="4-0a0b0c0d"))["removed"] == 1

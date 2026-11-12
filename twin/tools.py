@@ -378,25 +378,8 @@ def _task_profile(svc: Any) -> Optional[str]:
     override), while the status (and its "profile") and the plugin context are made once for the whole process, so
     they may be another bot's. Never falls back to either: without the task's own home (the override, else the
     process's home) the answer is None, so a twin can only ever reach its own archive."""
-    try:
-        import hermes_constants as hc
-    except Exception:
-        return None
-    try:
-        home = hc.get_hermes_home_override()
-        if not home:  # no per-task bot: the chat runs in this process's own Hermes home
-            home = hc.get_hermes_home()
-    except Exception:
-        return None
-    if not home:
-        return None
-    try:
-        name = hc.profile_name_for_home(home)
-    except Exception:  # only a bot folder it can name for sure; anything else is no bot (never "default")
-        from pathlib import Path
-        p = Path(str(home))
-        name = p.name if p.parent.name == "profiles" else None
-    return name if isinstance(name, str) and name else None
+    home = config.hermes_home()
+    return config.profile_name(home) if home else None  # only a bot folder it can name for sure (never "default")
 
 
 def twin_transcripts_search(args: dict | None = None, **kwargs: Any) -> str:
@@ -405,8 +388,7 @@ def twin_transcripts_search(args: dict | None = None, **kwargs: Any) -> str:
     webhook or the API server."""
     from . import transcripts as tr
     try:
-        from .tasks_api import _messaging_chat  # (the rule of twin_ask_machine and `/twin ask`)
-        if _messaging_chat():
+        if config.chat_not_local():  # (the rule of `/twin ask`: fails closed)
             return json.dumps({"error": "Kept conversations can only be searched in a chat on this computer, "
                                         "not through a messaging app."})
         from . import tasks as _tasks

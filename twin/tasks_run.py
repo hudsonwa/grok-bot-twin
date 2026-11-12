@@ -40,7 +40,6 @@ from .model import REF_RE
 log = logging.getLogger(__name__)
 
 IDLE_LOOK_S = 5.0
-ANSWER_RETRY_S = 3.0  # pause before asking again for an answer when the mailbox could not be asked
 HEARTBEAT_S = 20.0   # how often a computer that works on a request asks the mailbox whether it still knows it
 POLL_WAIT_S = 50
 OUTPUT_CAP = 256 * 1024
@@ -132,22 +131,12 @@ def _serving_here() -> bool:
 def _result(task_id: str, machine: dict, twin: str, state: str, code: Optional[str] = None, seconds: Any = None,
             reply: str = "") -> dict:
     name = machine["name"]
-    question = tasks.asking().get(task_id) if state == "waiting_approval" else None
     out = {"id": task_id, "machine": {"id": machine["id"], "name": name}, "twin": twin, "state": state,
            "label": tasks.label(state, name, seconds, code),
            "seconds": int(round(seconds)) if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)
            else None, "reply": reply if state == "done" else "", "error": None}
     if state not in ("done",) + tasks.OPEN_STATES:
         out["error"] = tasks.message(code or "task_failed", name=name)
-    elif state == "waiting_approval" and question:
-        # that computer's owner chose "Let my own linked computers approve": the step is shown here too
-        # (the step, for the owner to read. Not its mark: what answers a step is shown to the owner by the page,
-        # by `hermes twin requests` and by /twin approve, never handed to a model with the tool's result)
-        out["approval"] = {"command": question["command"], "description": question["description"]}
-        out["hint"] = (f"{name} asks before it does one step. Show the user that step exactly. Only the user "
-                       f"can answer it: they type /twin approve in this chat themselves (it shows the step "
-                       f"again and the line that answers it), or use the Twins page here or on {name}. Then "
-                       f"ask how the request went.")
     elif state == "waiting_approval":
         out["hint"] = (f"A step needs your approval on {name}. Approve or refuse it there (Twins page, "
                        f"Requests); then ask how the request went.")
@@ -157,17 +146,8 @@ def _result(task_id: str, machine: dict, twin: str, state: str, code: Optional[s
     return out
 
 
-def _note_question(svc: Any, task_id: str, state: str, obj: dict) -> None:
-    """Keep (or forget) the step the asked computer showed this one for its own request. It is believed only
-    from the sharing computer's signed answer to this computer's own look at its own request (_call)."""
-    shown = obj.get("approval") if state == "waiting_approval" else None
-    if tasks.set_asking(task_id, shown if isinstance(shown, dict) else None) and svc is not None:
-        with contextlib.suppress(Exception):
-            svc.emit("tasks", None, {"what": "needs_answer", "count": 1})
-
-
 def _follow(st: dict, task_id: str, machine: dict, twin: str, wait_s: float, seen: Optional[str] = None,
-            known: str = "queued", svc: Any = None) -> dict:
+            known: str = "queued") -> dict:
     """Wait for a request to end, keep this computer's log in step, and return the result. A request that
     starts waiting for approval is reported at once (`seen` None); looking again at one that was already
     waiting (`seen`) waits for what comes after. An unreachable mailbox while waiting is "could not be reached"."""
@@ -186,14 +166,12 @@ def _follow(st: dict, task_id: str, machine: dict, twin: str, wait_s: float, see
         if status != 200:
             code = wire if wire in tasks.CODES else "tasks_unreachable"
             tasks.log_update("out", task_id, "failed", code)
-            tasks.set_asking(task_id, None)
             return _result(task_id, machine, twin, "failed", code)
         state = obj.get("state") if obj.get("state") in tasks.STATES else "failed"
         code = obj.get("code") if obj.get("code") in tasks.CODES else None
         seconds = tasks.whole_seconds(obj.get("seconds"))
         reply = tasks.clean_reply(obj.get("reply")) if state == "done" else ""
         tasks.log_update("out", task_id, state, code, seconds, reply)
-        _note_question(svc, task_id, state, obj)
         if state in tasks.END_STATES or (state == "waiting_approval" and stop_at_waiting) \
                 or deadline - time.monotonic() <= 0.5:
             return _result(task_id, machine, twin, state, code, seconds, reply)
@@ -237,7 +215,7 @@ def ask(svc: Any, machine: Any, text: Any, twin: Any = None, wait_s: float = tas
     task_id = obj["id"]
     tasks.log_entry("out", task_id, target["name"], twin_name, clean, "queued")
     svc.emit("tasks", None, {"what": "asked", "count": 1})
-    out = _follow(st, task_id, target, twin_name, wait_s, svc=svc)
+    out = _follow(st, task_id, target, twin_name, wait_s)
     svc.emit("tasks", None, {"what": "answered" if out["state"] in tasks.END_STATES else "waiting", "count": 1})
     return out
 
@@ -254,48 +232,12 @@ def check(svc: Any, task_id: Any, wait_s: float = 0) -> dict:
     machine = next((m for m in tasks.machines(st) if m["name"] == name), {"id": "m-000000000000", "name": name})
     twin = tasks.short(row.get("twin"), 100)
     if row.get("state") in tasks.END_STATES:
-        tasks.set_asking(task_id, None)
         # ended already: the answer itself is not kept in full; the log's short form is what is left
         return _result(task_id, machine, twin, row["state"], row.get("code"), row.get("seconds"),
                        tasks.short(row.get("reply")))
     return _follow(st, task_id, machine, twin, wait_s,
                    seen=row.get("state") if wait_s > 0 and row.get("state") in tasks.OPEN_STATES else None,
-                   known=row.get("state"), svc=svc)
-
-
-def answer(svc: Any, task_id: Any, choice: Any, q: Any) -> None:
-    """The owner answers, on THIS computer, a step that waits on another computer for a request asked from here.
-    Possible only for a step that computer showed this one (its own mode is "linked"), and only with the mark
-    of the step as it was shown. The answer travels signed, as every call does; the asked computer decides by
-    its own rules whether it counts. Raises TaskError."""
-    if choice not in tasks.CHOICES:
-        raise ValueError("choice must be once or deny")
-    if not isinstance(task_id, str) or not tasks.TASK_ID_RE.match(task_id):
-        raise tasks.TaskError("unknown_task")
-    row = next((r for r in reversed(tasks.read_log()) if r.get("id") == task_id and r.get("dir") == "out"), None)
-    if row is None or row.get("state") in tasks.END_STATES:
-        tasks.set_asking(task_id, None)
-        raise tasks.TaskError("unknown_task")
-    name = fp.machine_name(row.get("peer"))
-    shown = tasks.asking().get(task_id)
-    if shown is None:
-        raise tasks.TaskError("approve_there", name=name)
-    if not isinstance(q, str) or not tasks.MARK_RE.fullmatch(q) or q != shown["q"]:
-        raise tasks.TaskError("step_changed")
-    st = fleet.load()
-    try:
-        status, _obj, wire = _call(st, "/v1/task/answer", {"id": task_id, "q": q, "choice": choice})
-    except follow.Unreachable:
-        raise tasks.TaskError("tasks_unreachable", name=name) from None
-    if status != 200:
-        if wire in ("step_changed", "unknown_task", "approve_there"):
-            tasks.set_asking(task_id, None)  # what was shown here is not what waits there any more
-            raise tasks.TaskError(wire, name=name)
-        raise tasks.TaskError("tasks_unreachable", name=name)
-    me = fleet.this_machine(st)
-    tasks.log_answered("out", task_id, choice, me["name"])
-    tasks.set_asking(task_id, None)
-    svc.emit("tasks", None, {"what": "approved" if choice == "once" else "denied", "count": 1})
+                   known=row.get("state"))
 
 
 def refresh_open(svc: Any, limit: int = 3) -> None:
@@ -372,8 +314,8 @@ def turn_env() -> dict:
 # ---- the line that heads a request when it arrives as a chat turn ---------------------------------------------------------
 # SENT_FROM above is how the line has always opened; SENT_LINE is the whole line now.
 # Worded against three things a model can do:
-# - asked from one computer about another, a twin took "it" for the asking computer and passed the request on
-#   with its own request tool, so the answer described the wrong computer;
+# - asked from one computer about another, a twin took "it" for the asking computer and tried to pass the request
+#   on, so the answer described the wrong computer;
 # - in a twin's first chat ever Hermes adds a note (introduce yourself, mention /help, offer a profile), and that
 #   offer went back to the other computer with the answer;
 # - a flat "no greeting" would overrule the way a twin is set up to speak: hence "in your usual voice", and the
@@ -384,13 +326,6 @@ SENT_LINE = (SENT_LEAD + "{name} through Grok Bot Twin. Answer it here, as you w
              "computer. The user reads the answer on {name}, not here: answer in your usual voice and stop when the "
              "request is answered. For this turn, skip any note that asks you to introduce yourself, mention "
              "commands or offer something.]")
-
-
-def is_sent_turn(user_message) -> bool:
-    """True when a chat turn's text is a request another of the owner's computers sent here (it opens as the
-    line above does). Only used to choose which note the turn gets; anyone typing that opening by hand merely
-    loses the hint about the request tool for that turn."""
-    return isinstance(user_message, str) and user_message.lstrip().startswith(SENT_LEAD)
 
 
 def turn_cwd() -> str:
@@ -494,16 +429,13 @@ def _clean_task(raw: Any) -> Optional[dict]:
 
 
 def do_task(svc: Any, raw: Any, report: Callable[..., None],
-            stopping: Callable[[], bool], wanted: Optional[Callable[[str, str], Optional[bool]]] = None,
-            answered: Optional[Callable[[str, str, float], Optional[dict]]] = None) -> None:
+            stopping: Callable[[], bool], wanted: Optional[Callable[[str, str], Optional[bool]]] = None) -> None:
     """Check one fetched request by this computer's own rules, run it, and report how it went.
     `report(task_id, state, code, seconds, reply)` tells the mailbox; this computer's log is written here.
     `wanted(task_id, state)` asks the mailbox, every HEARTBEAT_S while the turn runs, whether it still knows the
     request (False: it does not; None: it could not be asked). A request the mailbox has forgotten (the sharing
     computer's Hermes was started again, the request ran out of time there) is stopped: nobody can receive its
-    answer any more, and until it ends this computer fetches nothing else.
-    `answered(task_id, q, wait_s)` asks the mailbox (held) whether the computer that asked has answered the
-    question with mark `q`; used only while this computer's mode is "linked"."""
+    answer any more, and until it ends this computer fetches nothing else."""
     task = _clean_task(raw)
     if task is None:
         return
@@ -564,60 +496,15 @@ def do_task(svc: Any, raw: Any, report: Callable[..., None],
             return "unknown_task"
         return None if tasks.accepting() else "switched_off"
 
-    def take_answer(q: str) -> None:
-        """While the question with mark `q` is open and was shown to the asking computer: fetch its answer.
-        Everything is checked again here, by this computer's own files, before the answer counts: the mode is
-        still "linked", the switch is on, the answer is for this very mark, it names the computer that asked
-        this very request, and that computer is linked now."""
-        while not over.is_set() and now_state.get("q") == q:
-            if tasks.mode() != "linked" or not tasks.accepting():
-                with telling:  # taken back: the asking computer is no longer shown the step
-                    if now_state.get("q") == q and not over.is_set():
-                        with contextlib.suppress(Exception):
-                            report(tid, "waiting_approval", None, None, "", ask=False)
-                return
-            began = time.monotonic()
-            try:
-                got = answered(tid, q, HEARTBEAT_S)
-            except Exception:
-                got = None
-            if over.is_set() or now_state.get("q") != q:
-                return
-            by = got.get("by") if isinstance(got, dict) else None
-            if not isinstance(got, dict) or got.get("q") != q or not isinstance(by, dict):
-                over.wait(0.2 if time.monotonic() - began > 2 else ANSWER_RETRY_S)
-                continue
-            linked_now = {m["id"] for m in tasks.machines(fleet.load()) if not m["this"]}
-            if by.get("id") == sender["id"] and sender["id"] in linked_now and tasks.accepting() \
-                    and tasks.decide_remote(tid, got.get("choice"), q, sender["name"]):
-                tasks.log_answered("in", tid, got["choice"], sender["name"])
-                svc.emit("tasks", None, {"what": "approved" if got["choice"] == "once" else "denied", "count": 1})
-            return
-
     def on_wait(question: Optional[dict]) -> None:
         # a step waits for this computer's owner (or stopped waiting). The question stays on this computer:
-        # the asker is told only "waiting for approval". Unless this computer's owner chose "Let my own linked
-        # computers approve" (read now, from this computer's own file): then the computer that asked is shown
-        # the step too, under the question's mark, and may answer it.
-        share = question is not None and answered is not None and tasks.mode() == "linked"
-        kept = tasks.set_pending(tid, question, shared=share)
+        # the asker is told only "waiting for approval".
+        tasks.set_pending(tid, question)
         state = "waiting_approval" if question is not None else "running"
         tasks.log_update("in", tid, state)
         with telling:
             now_state["state"] = state
-            now_state["q"] = kept["q"] if kept and share else None
-            if now_state["q"]:
-                report(tid, state, None, None, "", ask={"q": kept["q"], "command": kept["command"],
-                                                         "description": kept["description"]})
-            elif question is not None and answered is not None:
-                # not shown to the asking computer, said in so many words: should an earlier "it goes on"
-                # have been lost on the way, the mailbox must not keep offering a step that is over
-                report(tid, state, None, None, "", ask=False)
-            else:
-                report(tid, state, None, None, "")
-        if now_state["q"]:
-            threading.Thread(target=take_answer, args=(kept["q"],), name="grok-bot-twin-request-answer",
-                             daemon=True).start()
+            report(tid, state, None, None, "")
         svc.emit("tasks", None, {"what": "needs_approval" if question is not None else "resumed", "count": 1})
 
     words = SENT_LINE.format(name=fp.note_machine(sender["name"])) + "\n" + text
@@ -648,10 +535,8 @@ def do_task(svc: Any, raw: Any, report: Callable[..., None],
     svc.emit("tasks", None, {"what": "finished", "count": 1})
 
 
-def _report_http(tid: str, state: str, code: Optional[str], seconds: Any, reply: str, ask: Any = None) -> None:
+def _report_http(tid: str, state: str, code: Optional[str], seconds: Any, reply: str) -> None:
     body = {"id": tid, "state": state}
-    if ask is not None:  # the question, for the computer that asked (mode "linked"); False takes it back
-        body["ask"] = ask or None
     if code:
         body["code"] = code
     if seconds is not None:
@@ -692,39 +577,11 @@ def _wanted_local(tid: str, state: str) -> Optional[bool]:
     return _known(*tasks_hub.hub.update({"id": me["id"], "name": me["name"]}, {"id": tid, "state": state})[:2])
 
 
-def _report_local(tid: str, state: str, code: Optional[str], seconds: Any, reply: str, ask: Any = None) -> None:
+def _report_local(tid: str, state: str, code: Optional[str], seconds: Any, reply: str) -> None:
     st = fleet.load()
     me = fleet.this_machine(st)
     body = {"id": tid, "state": state, "code": code, "seconds": seconds, "reply": reply}
-    if ask is not None:
-        body["ask"] = ask or None
     tasks_hub.hub.update({"id": me["id"], "name": me["name"]}, body)
-
-
-def _answer_of(status: int, obj: Any, q: str) -> Optional[dict]:
-    got = obj.get("answer") if status == 200 and isinstance(obj, dict) else None
-    if isinstance(got, dict) and got.get("q") == q and got.get("choice") in tasks.CHOICES:
-        return got
-    return None
-
-
-def _answered_http(tid: str, q: str, wait_s: float) -> Optional[dict]:
-    """Has the computer that asked answered the question with this mark? (see do_task) Believed only from the
-    sharing computer's signed answer to this very call."""
-    try:
-        status, obj, _wire = _call(fleet.load(), "/v1/task/answered", {"id": tid, "q": q, "wait_s": int(wait_s)},
-                                   timeout=wait_s + 15)
-    except follow.Unreachable:
-        return None
-    return _answer_of(status, obj, q)
-
-
-def _answered_local(tid: str, q: str, wait_s: float) -> Optional[dict]:
-    st = fleet.load()
-    me = fleet.this_machine(st)
-    # (short holds: this runs inside the sharing computer's own Hermes, which must be able to stop at once)
-    return _answer_of(*tasks_hub.hub.answered({"id": me["id"], "name": me["name"]},
-                                              {"id": tid, "q": q, "wait_s": min(wait_s, 2)})[:2], q)
 
 
 def _poll_once(svc: Any, st: dict, accept: bool, wait_s: int) -> Optional[bool]:
@@ -736,7 +593,7 @@ def _poll_once(svc: Any, st: dict, accept: bool, wait_s: int) -> Optional[bool]:
         me = fleet.this_machine(st)
         _status, obj = tasks_hub.hub.poll({"id": me["id"], "name": me["name"], "inside": _stop.is_set},
                                           {"accept": accept, "wait_s": wait_s})
-        report, wanted, answered = _report_local, _wanted_local, _answered_local
+        report, wanted = _report_local, _wanted_local
     elif r == "follower":
         try:
             status, obj, _wire = _call(st, "/v1/task/poll", {"accept": accept, "wait_s": wait_s},
@@ -745,12 +602,12 @@ def _poll_once(svc: Any, st: dict, accept: bool, wait_s: int) -> Optional[bool]:
             return None
         if status != 200:
             return None
-        report, wanted, answered = _report_http, _wanted_http, _answered_http
+        report, wanted = _report_http, _wanted_http
     else:
         return None
     if not accept or not isinstance(obj.get("task"), dict):
         return False
-    do_task(svc, obj["task"], report, _stop.is_set, wanted, answered)
+    do_task(svc, obj["task"], report, _stop.is_set, wanted)
     return True
 
 

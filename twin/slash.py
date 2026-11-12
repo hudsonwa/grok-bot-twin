@@ -19,7 +19,6 @@ HELP = ("/twin                    your twins and what to do next\n"
         "/twin recent [TWIN]      recent activity (when and what kind; never content)\n"
         "/twin ask COMPUTER: TEXT ask this twin's copy on another of your computers to do something there\n"
         "/twin requests           whether other computers may ask this one, and the log\n"
-        "/twin approve MARK       let a step go ahead that waits on another computer for your request (or: /twin deny MARK)\n"
         "/twin demo [start|remove|grok-edit|hermes-edit|conflict|secret]   a sample twin with invented data\n"
         "Everything else (connect your Grok bots, choose a version, earlier versions, skill sync) is on the "
         "Twins page in Hermes Desktop, or: hermes twin --help.")
@@ -27,7 +26,9 @@ HELP = ("/twin                    your twins and what to do next\n"
 NO_TWINS = ("No twins yet. Open the Twins page in Hermes Desktop and press Connect my Grok bots. "
             "To look around first, `/twin demo` starts a sample with invented data.")
 
-LOCAL_PLATFORMS = {"", "local", "cli", "tui", "desktop"}
+# Hermes' own local surfaces. Anything else (a messaging app, a webhook, the API server) and a missing, empty or
+# unknown platform count as NOT on this computer: the check fails closed.
+LOCAL_PLATFORMS = frozenset({"local", "cli", "tui", "desktop"})
 READ_ONLY = {"status", "recent", "help"}
 _RECENT_KINDS = {"sync": "check", "skill_change": "skill change", "name_change": "name change",
                  "routine_change": "routine change", "session": "chat in Hermes"}
@@ -35,9 +36,10 @@ _SIDES = {"grok": "Grok", "hermes": "Hermes", "both": "both"}
 
 
 def _local(platform: Any) -> bool:
-    """True on this computer (CLI, TUI, Desktop). Messaging chats may only read status."""
+    """True on this computer (CLI, TUI, Desktop: Hermes names the platform of every surface). Messaging chats,
+    and any caller whose platform is missing or unknown, may only read status."""
     value = getattr(platform, "value", platform)
-    return value is None or (isinstance(value, str) and value.strip().lower() in LOCAL_PLATFORMS)
+    return isinstance(value, str) and value.strip().lower() in LOCAL_PLATFORMS
 
 
 def _svc():
@@ -102,41 +104,8 @@ def _ask(raw: str) -> str:
     return "\n".join(describe_result(_svc().tasks_ask(machine.strip(), text.strip())))
 
 
-def _answer(raw: str) -> str:
-    """`/twin approve 3fa9c1d2` / `/twin deny 3fa9c1d2`: the owner answers, in the chat, a step that waits on
-    another computer for a request asked from this one. The mark is the one shown with the step, so the answer
-    counts for that step only; without a mark the line to type is shown again and nothing is answered."""
-    from . import tasks
-    from .tasks_api import describe_result
-    words = raw.strip().split()
-    choice = "once" if words[0].lower() == "approve" else "deny"
-    mark = words[1].lower() if len(words) > 1 else ""
-    svc = _svc()
-    waiting = svc.tasks(refresh=True)["asking"]
-    if not waiting:
-        return "No step on another computer waits for your answer here."
-    hit = [w for w in waiting if w["q"] == mark]
-    if len(hit) != 1:
-        lines = ["Say which step, with its mark:"]
-        for w in waiting:
-            lines.append(f"- on {w['peer']}: {w['command'] or w['description']}")
-            lines.append(f"    /twin approve {w['q']}    or    /twin deny {w['q']}")
-        return "\n".join(lines)
-    w = hit[0]
-    svc.tasks_answer(w["id"], choice, w["q"], typed=True)
-    first = (f"Sent to {w['peer']}: do that one step once." if choice == "once"
-             else f"Sent to {w['peer']}: don't do that step.")
-    out = svc.tasks_check(w["id"], 45)
-    return "\n".join([first] + describe_result(out))
-
-
 def handle(raw_args: str = "", **kwargs: Any) -> str:
     try:
-        first = (raw_args or "").strip().lower().split(" ")[0]
-        if first in ("approve", "deny"):
-            if not _local(kwargs.get("platform")):
-                return "From a messaging chat, /twin only shows status and recent activity. Run this in Hermes on your computer."
-            return _answer(raw_args or "")
         if (raw_args or "").strip().lower().startswith("ask ") or (raw_args or "").strip().lower() == "ask":
             if not _local(kwargs.get("platform")):
                 return "From a messaging chat, /twin only shows status and recent activity. Run this in Hermes on your computer."

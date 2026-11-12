@@ -435,22 +435,6 @@ async def batch_downloads(body: Any = Body(None)) -> Any:
     return await _call(svc.downloads_scan, b.get("since"), _pid_list(b.get("pair_ids")), apply)
 
 
-@router.get("/batch/computer-use")
-async def batch_computer_use() -> Any:
-    svc = await asyncio.to_thread(_svc)
-    return await _call(svc.computer_use_status)
-
-
-@router.post("/batch/grok-part")
-async def batch_grok_part(body: Any = Body(None)) -> Any:
-    """{"pair_ids"}: let Hermes do the Grok part for these twins (when computer use is set up); {"stop": true}."""
-    b = _body(body)
-    svc = await asyncio.to_thread(_svc)
-    if _bool(b, "stop"):
-        return await _call(svc.grok_part_stop)
-    return await _call(svc.grok_part_handoff, _pid_list(b.get("pair_ids")))
-
-
 @router.post("/pairs/{pid}/send-to-grok")
 async def send_to_grok(pid: str) -> Any:
     svc = await asyncio.to_thread(_svc)
@@ -765,27 +749,14 @@ async def tasks_approve(tid: str, body: Any = Body(None)) -> Any:
 
 @router.post("/tasks/mode")
 async def tasks_mode(body: Any = Body(None)) -> Any:
-    """What happens on THIS computer when a step of a request needs approval: {"mode": "here" | "linked" |
-    "safe"}. Only this computer's own page can call it (Hermes' own auth sits in front, as for every route);
-    nothing another computer sends reaches it."""
+    """What happens on THIS computer when a step of a request needs approval: {"mode": "here" | "safe"}.
+    Only this computer's own page can call it (Hermes' own auth sits in front, as for every route); nothing another
+    computer sends reaches it. A request for "linked" (approving from another computer, removed) is refused."""
     b = _body(body)
-    if b.get("mode") not in ("here", "linked", "safe"):
+    if b.get("mode") not in ("here", "safe"):
         raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
     svc = await asyncio.to_thread(_svc)
     return await _call(svc.tasks_mode, b["mode"], True)
-
-
-@router.post("/tasks/{tid}/answer")
-async def tasks_answer(tid: str, body: Any = Body(None)) -> Any:
-    """Answer, on this computer, a step that waits on ANOTHER computer for a request asked from here, when that
-    computer lets this one answer it (GET /tasks `asking`): {"choice": "once" | "deny", "q": the mark shown}.
-    The mark is required: the answer counts for the step that was shown and for no other."""
-    b = _body(body)
-    if not _TASK_RE.match(tid or "") or b.get("choice") not in ("once", "deny") \
-            or not (isinstance(b.get("q"), str) and re.fullmatch(r"[0-9a-f]{8}", b["q"])):
-        raise HTTPException(status_code=400, detail={"code": "bad_input", "message": "That request was not understood."})
-    svc = await asyncio.to_thread(_svc)
-    return await _call(svc.tasks_answer, tid, b["choice"], b["q"], True)
 
 
 @router.post("/tasks/check")

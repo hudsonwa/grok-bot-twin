@@ -1,28 +1,23 @@
-"""Lazy background sync loop: metadata-only check every sync_interval_seconds (min 5), then a
-Grok->Hermes sync of the pairs that changed. Never raises; backs off (up to 10 min) on repeated
-engine errors. Started on the first hook/REST call, stopped through ctx.on_unload.
-
-The same check also runs right away when the Grok app rewrites its bot list (see watch.py: a second
-thread that sleeps until that one file changes, then calls kick()). The timed check is the safety net.
+"""Lazy background sync loop: every sync_interval_seconds (min 5) one service tick (check + sync; see tick). Never
+raises, never backs off. Starts on a hook/REST call once there is work (a twin, or sharing/linked), ends when none is
+left, and through ctx.on_unload. The same check also runs right away when the Grok app rewrites its bot list (see
+watch.py: a second thread, only with a real twin, that sleeps until that one file changes, then calls kick()).
 """
 from __future__ import annotations
 
 import logging
 import threading
-import time
 from typing import Callable, Optional
 
 from . import config, watch
-from .engine import EngineError
 
 log = logging.getLogger(__name__)
 
-MAX_BACKOFF = 600.0
 _stop = threading.Event()
 _wake = threading.Event()
 _thread: Optional[threading.Thread] = None
 _lock = threading.Lock()
-_state = {"ticks": 0, "errors": 0, "last_error": None, "last_tick_at": None, "next_in": None}
+_state = {"ticks": 0, "last_error": None}
 
 
 def _interval() -> float:
@@ -34,50 +29,44 @@ def _interval() -> float:
 
 def _loop(get_service: Callable) -> None:
     delay = 1.0
-    failures = 0
     while not _stop.is_set():
-        _state["next_in"] = delay
         _wake.wait(delay)
         _wake.clear()
         if _stop.is_set():
             break
         try:
-            get_service().tick()
-            failures = 0
+            svc = get_service()
+            if not svc.has_background_work():
+                watch.stop()  # nothing left: both threads end; a later call starts them again
+                break
+            svc.tick()
             _state["last_error"] = None
-        except EngineError as exc:
-            failures += 1
-            _state["errors"] += 1
-            _state["last_error"] = exc.code
-            if failures == 1 or failures % 10 == 0:
-                log.warning("grok-bot-twin: background check failed (%s): %s", exc.code, exc.message)
-        except Exception as exc:  # never let the thread die
-            failures += 1
-            _state["errors"] += 1
-            _state["last_error"] = exc.__class__.__name__
-            log.exception("grok-bot-twin: background check crashed")
+        except Exception as exc:  # never let the thread die; said once per new problem
+            code = getattr(exc, "code", None) or exc.__class__.__name__
+            if code != _state["last_error"]:
+                log.warning("grok-bot-twin: background check failed (%s)", code, exc_info=True)
+            _state["last_error"] = code
         _state["ticks"] += 1
-        _state["last_tick_at"] = time.time()
-        base = _interval()
-        delay = base if failures == 0 else min(MAX_BACKOFF, base * (2 ** min(failures, 10)))
+        delay = _interval()
 
 
 def ensure_started(get_service: Callable) -> bool:
-    """Start the loop once per process. Returns True when a new thread was started."""
+    """Start the loop once per process, once there is work. Returns True when a new thread was started."""
     global _thread
     with _lock:
         if _stop.is_set():
             return False
-        # the fast path: wake this loop when the Grok app rewrites its bot list (nothing is watched without a
-        # real twin, or with the setting off)
-        watch.ensure_started(lambda: get_service().watch_folder(), kick)
+        try:
+            svc = get_service()
+            if not svc.has_background_work():
+                return False  # a fresh install: no thread; the next hook or page call looks again
+            if svc.watch_folder() is not None:  # the fast path (a real twin, the setting on)
+                watch.ensure_started(lambda: get_service().watch_folder(), kick)
+        except Exception:
+            return False
         if _thread is not None and _thread.is_alive():
             return False
-        try:
-            from agent.memory_provider import spawn_context_thread  # keeps HERMES_HOME/profile contextvars
-            t = spawn_context_thread(_loop, name="grok-bot-twin-sync", daemon=True, args=(get_service,))
-        except Exception:
-            t = threading.Thread(target=_loop, name="grok-bot-twin-sync", daemon=True, args=(get_service,))
+        t = config.thread(_loop, "grok-bot-twin-sync", (get_service,))
         t.start()
         _thread = t
         return True
@@ -108,11 +97,11 @@ def _fast_note() -> str:
 
 def describe() -> str:
     if not running():
-        return (f"Background check starts with the first chat or Twins page visit (every {int(_interval())} s"
-                f"{_fast_note()})")
+        return (f"Background check starts with the first chat or Twins page visit once there is a twin (every "
+                f"{int(_interval())} s{_fast_note()})")
     msg = f"Background check every {int(_interval())} s, {_state['ticks']} done{_fast_note()}"
     if _state["last_error"]:
-        msg += f"; last problem: {_state['last_error']} (backing off)"
+        msg += f"; last problem: {_state['last_error']}"
     return msg
 
 

@@ -71,7 +71,7 @@ def test_demo_secret_value_absent_everywhere(svc, home):
     for s in surfaces:
         assert key not in dumps(s)
     assert key not in tools.twin_status({}) and key not in tools.twin_recent({})
-    assert key not in slash.handle("") and key not in slash.handle("sync")
+    assert key not in slash.handle("", platform="cli") and key not in slash.handle("sync", platform="cli")
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         for argv in (["status", "--json"], ["sync"], ["recent"], ["list-grok"], ["parity"], ["checklist"]):

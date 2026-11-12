@@ -173,7 +173,6 @@ same folder, fsync, rename; links are not followed):
 | `instructions-sync.json` | per twin that follows Grok's instructions: on or off, when its newest setup export was read and from where (shared folder or Downloads), a SHA-256 digest of that file's name, size and date, a 12-character digest of the instructions both sides last agreed on, when Grok's last change arrived and the id of the earlier version it left, and the line numbers left out because they looked like a password or key. the times of the automatic changes of the last day (at most 4 a day), and a 12-character digest of the text the last one wrote. While a card waits for your answer (the instructions changed both in Grok and in Hermes, or a file that is not taken by itself, see "Files it reads"): Grok's instructions as screened (no password-like line), their 12-character digest and why the card asks, so you can still choose them after the file changed; your answer "take Grok's" names that digest and is refused when a later export changed the card. Stop twinning forgets it |
 | `instructions-sync-settings.json` | whether Downloads is looked in too, and since when |
 | `batch-seen.json` | the setup export files the new-twins sheet already imported: a SHA-256 digest of each file's name, size and date (no name, no text), at most 500, so the same file is not imported twice |
-| `grok-part.json` | only while **Let Hermes do the Grok part** is on (30 minutes at most, or until stopped): the ids and names of the ticked twins and a digest of the request text, which the `pre_tool_call` guard reads |
 | `events.jsonl` | last 500 events, metadata only (type, time, twin id, bot name, counts, item ids; never item text or secret values) |
 | `activity.json` | per twin: time of the last Hermes chat turn and a count (no content) |
 | `digest.json` | per-twin digest switches (off unless you turn them on) |
@@ -202,14 +201,13 @@ same folder, fsync, rename; links are not followed):
 | `xs-config.json` | only once settings follow a twin or you touched one of their switches: this computer's switch per item (tools, preferences, persona, model), and on a linked computer what the sharing computer last said (a rev, its switches) and per twin a digest, a time, which items changed, the names of what is still to set up here, and, while the model follows, the names of the model and provider this computer had for that twin (so they can be put back when the model is switched off). No other setting's value is kept in it |
 | `xs-config-points/<twin id>.json` | on a linked computer: what that twin's Hermes bot had before settings arrived (the listed `config.yaml` keys and the persona block of its `SOUL.md`), the last ten times, so "Put back" can return it. Never a key or sign-in: only the keys on the list are noted |
 | `routines.json` | only once Routines was switched on, or a linked computer heard of routines: the two switches ("Routines", "Routines may run on this computer"); on the computer that shares: per routine its made-up id, the twin's id, Hermes' id of the job, name, prompt (after the password-and-key check), schedule, skill names, where it runs, and what each linked computer last reported (switches, applied list, ids switched on); on a linked computer: the list it holds and the id of each copy's job; and up to 30 routines as they were before the plugin changed or removed them there (30 days), so they can be put back |
-| `tasks.json` | only once you touched the switch "Let my other computers ask this one to do things": whether it is on, and since when, and your choice for a step that needs approval when it is not the default ("linked" or "safe"). A missing or unreadable file means off and "Ask on this computer". Written only by this computer's own page and commands; nothing another computer sends reaches it. When this computer is unlinked the switch goes off and "linked" goes back to the default; "safe" stays |
+| `tasks.json` | only once you touched the switch "Let my other computers ask this one to do things": whether it is on, and since when, and your choice for a step that needs approval when it is not the default ("safe"; a "linked" kept by an older version reads as the default). A missing or unreadable file means off and "Ask on this computer". Written only by this computer's own page and commands; nothing another computer sends reaches it. When this computer is unlinked the switch goes off and "linked" goes back to the default; "safe" stays |
 | `tasks-seen.json` | only on the sharing computer, once requests are used: the numbers of the requests it accepted in the last 30 minutes (a computer's id, a random number, a time), so that a recorded request cannot run a second time after Hermes was started again (if this file cannot be read or written, only the memory of the Hermes that is running guards against that) |
 | `tasks-turns.json` | only while a request's chat turn runs on this computer: the number Hermes gave that chat, so that nothing the chat starts can answer an approval question through the plugin or pass the request on (forgotten when the turn ends, or after an hour). When the turn has to run in Hermes' single-question mode, which gives no such number beforehand, the file holds the time that turn started instead, and until it ends (four minutes at most) no chat on this computer can do either; the Twins page and your own terminal still can |
 | `tasks-log.json` | the newest 200 requests of this computer: asked from here (to which computer, which twin, the first 300 characters of the request and of the answer, how it ended, how long it took), asked of this computer (from which computer, the same fields), and on the sharing computer the ones it only passed along (who asked whom and how it ended; no text). Password-like text is masked before anything is written |
 | `tasks-heard.json` | which of your other computers had their own requests switch on when this computer last heard (computer ids and true or false, nothing else): on the computer that shares from its own mailbox, on a linked computer from the sharing computer's signed answer (one optional key, `takes_requests`, on the "nothing changed" answer). Written only when it changed; emptied when this computer is unlinked. An unlink also writes this computer's own switch (`tasks.json`) off again, so a new link starts with requests off |
 | `tasks-worker.lock` | an empty lock file so only one Hermes process on a computer works on requests at a time |
-| `tasks-approvals.json` | only while a request's step waits for your approval on this computer: the request's id, the command and the short reason as Hermes shows them (password-like text masked, file paths shown, 400 and 300 characters at most), when it was asked, and your answer ("once" or "deny") until the waiting process has read it. Emptied when the request ends. Never sent anywhere, with one exception that you choose on this computer: while its choice is "Let my own linked computers approve", the command and the short reason (as shown here, password-like text masked) go through the sharing computer to the one computer that asked, under the question's mark |
-| `tasks-asking.json` | only on a computer that asked, while a step of its own request waits on a computer whose choice is "Let my own linked computers approve": the request's id, that step as the other computer showed it (the same two texts, the mark, when). Dropped when the step is answered or stops waiting, after six minutes at the latest, and when this computer is unlinked |
+| `tasks-approvals.json` | only while a request's step waits for your approval on this computer: the request's id, the command and the short reason as Hermes shows them (password-like text masked, file paths shown, 400 and 300 characters at most), when it was asked, and your answer ("once" or "deny") until the waiting process has read it. Emptied when the request ends. Never sent anywhere. |
 | `transcripts/` (0700) and `keys/` (0700) | only once full transcripts were switched on for a twin: `keys/transcripts.key` (32 random bytes, 0600, made here, never sent anywhere; kept outside `transcripts/`, so a copy of that folder alone cannot be read), `transcripts/archive.db` (0600: per kept conversation and message, the side (Grok or Hermes), role, time and the text sealed with the 0.2 memory box construction (SHAKE-256 stream + HMAC-SHA256, the tag binds twin, conversation and position: the plugin's own encrypt-then-MAC construction from standard primitives, not a packaged AEAD); a full-text index whose entries are keyed hashes of words, per twin, never the words), `settings.json` (per twin: the two switches, since when, and which kept Grok conversation became which Hermes chat: the Hermes session id of each imported chat, as Hermes names it). `exports/` holds JSON exports you asked for (decrypted, each a new file made 0600 from the start; an existing file or a link is never written to). Asking whether transcripts are on, or how many are kept, does not make this folder. **Forget** (`hermes twin transcripts forget --yes`) deletes a twin's rows (SQLite secure delete), its settings, the exports the plugin wrote for that twin in `exports/` and any import file of that twin left in `outbox/` (an export you wrote elsewhere with `--file` is your own copy and stays). Stop twinning does the same Forget for that twin. When no twin keeps anything any more, `archive.db` and the key are deleted too. An import file older than ten minutes (left by a stopped run) is deleted at the next import or Forget, whichever twin it was for. This protects copies of the archive (a backup, a synced folder, a copy of `transcripts/`); it does not protect against someone who can already read your files, or a copy of the whole plugin data folder, the key included. What a copy of `archive.db` still shows without the key: the twin's id, which side each conversation is from, when conversations and messages were started and written, who spoke (user or bot), how many messages there are and roughly how long each is (in steps of 64 bytes), how often each (unnamed) word hash occurs and which messages share one (within one twin), and a keyed hash of each conversation's Grok id or Hermes session id, which cannot be checked against a guess without the key |
 
 Not in this folder: the Twins page keeps a few notes of its own in Hermes Desktop's storage for this plugin
@@ -221,8 +219,7 @@ an `@`, lies under `Library/CloudStorage` or has a folder whose name starts with
 folder's name, where the set-up folder is on this computer, whether it was complete, which release file was
 still missing with its download address, whether the twin joined through the shared folder, and whether the
 set-up was finished; never a pass) and the step of it you were at; that you chose to wait for a bot
-that left Grok; and that you were sent to choose a model. While Hermes does the Grok part for new twins
-(at most 30 minutes): `batch-open`, the ticked twins' ids and two times, so the Twins page reopens their sheet. Besides: the list of twins something is remembered
+that left Grok; and that you were sent to choose a model. Besides: the list of twins something is remembered
 for, the Hermes profile your twins are looked after in, when you unlinked this computer on the page, which bots
 you had ticked in "Connect my Grok bots" (their Grok ids only, until a twin is made or the ticks are cleared), and, after
 "Remove Grok Bot Twin…", that everything was removed (so the last screen is still there after a look elsewhere;
@@ -460,12 +457,13 @@ was started with), refused when anyone but you or root could change that file.
 
 ## Background work
 
-Two threads per Hermes process (plus the ones under 3 to 8 while you use them), started lazily (first chat turn, session start or Twins page request, never in
-`register()`), stopped when the plugin unloads.
+Up to two threads per Hermes process (plus the ones under 3 to 8 while you use them), started lazily (first chat turn, session start or Twins page request, never in
+`register()`) and only once there is a twin or this computer shares or is linked (none at all before that); they end
+when nothing is left to do, and when the plugin unloads.
 
 1. **The check** (`grok-bot-twin-sync`). Every `sync_interval_seconds` (default 60, minimum 5) it runs
    `botport twin check` (file metadata only: time, size, inode) and updates only the twins whose Grok side
-   changed. It backs off on repeated errors. At most every 15 minutes the same thread also reads the newest setup
+   changed. Each part of a round stands alone: one that fails is tried again next round and never holds up the others. At most every 15 minutes the same thread also reads the newest setup
    export of each twin that follows Grok's instructions (see "Files it reads") and acts on it: Grok's instructions
    are saved in the twin only when Hermes did not change them since the two last agreed, the file is bound to the
    twin's own Grok bot, and fewer than 4 such changes were made that day (the version before is kept under Earlier
@@ -509,8 +507,7 @@ Two threads per Hermes process (plus the ones under 3 to 8 while you use them), 
    waits inside its process) and runs what arrives, one request at a time. While the switch is off it looks at
    the switch file every 5 seconds and does nothing else; a computer that never used the switch runs no such
    thread. While a request's chat turn runs, a second short-lived thread asks the sharing computer every 20
-   seconds whether the request was withdrawn. Under "Let my own linked computers approve", one more
-   short-lived thread per waiting step asks the sharing computer for the asking computer's answer.
+   seconds whether the request was withdrawn.
 6. **Routines** (`grok-bot-twin-routines`, `twin/routines.py`), only on a computer that shares or is linked,
    and only once Routines was switched on (or heard of) there. Every 30 seconds it looks at the date and size
    of its twins' Hermes job files and reads them only when one changed: on the computer that shares, to notice
@@ -813,9 +810,8 @@ prompt file, and stays readable on a plain home network like everything else tha
 ### Asking a twin on another of your computers (off on every computer until you switch it on there)
 
 - **No new listening socket, no new secret.** Requests use the link above: four more routes on the sharing
-  computer's one address (`/v1/task/ask`, `wait`, `poll`, `update`), and two that do something only for a
-  step the asked computer chose to show the asking one (`/v1/task/answer`, `answered`; see the three choices
-  below). Each call is signed with the linked
+  computer's one address (`/v1/task/ask`, `wait`, `poll`, `update`). None of them answers a step: that is
+  done on the asked computer only. Each call is signed with the linked
   computer's own key, exactly like the calls for the twin list (the key itself never travels), must carry a
   time within 15 minutes of the sharing computer's clock and a number used only once, so a recorded call cannot
   be sent again; each answer is signed back, so only the real sharing computer can hand a computer a request or
@@ -857,36 +853,11 @@ prompt file, and stays readable on a plain home network like everything else tha
   tries to answer through the plugin (`hermes twin requests approve` from inside that turn). The honest limit:
   that turn runs with this computer's tools, and what your Hermes lets a chat do without asking, a request can
   do too; the plugin's question is as strong as your Hermes approval settings, not a sandbox.
-- **Three choices for a step that needs approval, made on the computer that runs the request.** The choice
+- **Two choices for a step that needs approval, made on the computer that runs the request.** The choice
   is kept in that computer's own `tasks.json` and set only by its own Twins page or `hermes twin requests
-  mode`: no route of the share server carries it, the chat turn of a request is refused when it tries, and
-  turning on the second choice is refused for a command a chat started. (Those two refusals go by the marks
-  Hermes puts in a chat's environment. A chat that your Hermes lets run any command without asking can remove
-  them: the same limit as for every refusal of this kind, stated above.)
-  "Ask on this computer" (the default) is the rule above.
-  "Let my own linked computers approve": while a step waits, the asked computer sends the step (as shown
-  there, password-like text masked) and the question's mark through the sharing computer to the one computer
-  that asked. That computer shows it in the chat, on its Twins page and in `hermes twin requests`, and you can
-  answer there: on the page, in a terminal of your own, or by typing `/twin approve` in the chat, which shows
-  the step again and the line with its mark. The step's text is part of the tool's result, so it is in that
-  chat's history and goes to that chat's model like the rest of the chat; the mark is not. The model's tool
-  has no way to answer, and a command a chat started is refused by the chat's number in its environment. That
-  is not a wall: a chat that your Hermes lets run any command without asking can run the command without that
-  number, or sign an answer itself with that computer's link key. With this choice you trust the chats on
-  your linked computers as far as their Hermes lets them act unasked; the warning says so. On a plain home
-  network the step's text can be read by others on it, like requests and answers. The answer is one more signed
-  call, used once like every call; the sharing computer keeps it only if it names the open question's mark and
-  comes from the computer that asked that very request, and hands it only to the asked computer, in a signed
-  answer. The asked computer then checks again by its own files: its choice is still this one, its switch is
-  on, the mark is the open question's, the sender is the computer that asked and is still linked. Only "once"
-  or "deny"; the first answer counts, yours on that computer included; when the step stops waiting the answer
-  is worth nothing. The asking computer's log says what was sent from it, the asked computer's log says what
-  it took and from which computer, and the sharing computer's log says so when it only passed an answer along.
-  The asking computer says "sent", not "approved": whether the answer counted is the asked computer's to say,
-  and shows in how the request ends. What you accept with this choice: a
-  step can go ahead with nobody at that computer, on the word of whoever sits at a linked computer; and the
-  sharing computer, which passes the answer along and names its sender, is trusted for that as it is for
-  naming who sent a request.
+  mode`: no route of the share server carries it, and the chat turn of a request is refused when it tries.
+  "Ask on this computer" (the default) is the rule above. (Until 0.3.4 a third choice let the computer that
+  asked answer the step; it was removed, and a stored "linked" now reads as "Ask on this computer".)
   "Only safe requests": every question Hermes asks about a step of a request is answered "deny" at once;
   nothing waits and the asker is told why; a step that already waits when you choose this is refused within a
   second. What Hermes does not ask about still runs, so this is as strict as
@@ -895,9 +866,12 @@ prompt file, and stays readable on a plain home network like everything else tha
 - **Who may ask.** Only a computer linked with a link code (or the sharing computer itself). The sender is
   whoever signed the call, never what the request says. The asked computer checks again by itself: its switch, that the
   sender is on its own list of your computers, the size, its own rate limit, and that the twin exists there.
-  A request is sent only from a chat on the asking computer itself (Hermes in a terminal or Hermes Desktop):
-  the tool refuses a chat that arrives through a messaging app, a webhook or the API server, and it refuses the
-  chat turn of a request that itself came from another computer, so a request is never passed on to a third.
+  A request is sent only by you, on the asking computer itself: `/twin ask` typed in a chat that Hermes names
+  as one of its local surfaces (its terminal, terminal UI or Desktop; a messaging app, a webhook, the API
+  server, or a caller that names no surface is refused: the check fails closed), `hermes twin ask` in a
+  terminal no chat started (a command that carries a chat's number or origin is refused), or the Twins page.
+  There is no model tool for it. The chat turn of a request that itself came from another computer is refused
+  too, so a request is never passed on to a third.
   The plugin's local API has the same door for the Twins page (`POST /tasks/ask`, behind Hermes' own sign-in).
   `/twin requests`, which shows the switch and this computer's request log (who asked, and the first words of
   each request and answer), is answered in a chat on this computer only, like `/twin ask`. The terminal
@@ -929,19 +903,6 @@ prompt file, and stays readable on a plain home network like everything else tha
   chats as it always does. They were written by that twin on one of your own computers, pass the plugin's
   check for instruction-like text before they are written, and Hermes checks them again when it loads them.
 
-- `pre_tool_call` (the guard for **Let Hermes do the Grok part**): it does nothing unless you pressed that
-  button on the Twins page and ticked "I will approve each step myself", and then only for 30 minutes (or until
-  Stop) and only for Hermes' `computer_use` tool. While on, it lets looking at the Grok window pass, makes Hermes
-  ask you before every other step, and refuses other apps, other chats, any text except the setup export request
-  or a ticked bot's name, keys other than Return, Escape and Tab (no paste), steps that do not name the Grok app,
-  listing apps or windows, and steps from any chat but the first one that used computer_use. If the guard itself cannot run
-  while the flow's file is there, the step is refused. It reads the default profile's
-  `config.yaml` (`platform_toolsets.cli`, `agent.disabled_toolsets`, `approvals.mode`, `computer_use.backend`) and
-  Hermes' `tools/facts.json` to find the driver; it runs nothing. It writes one file, `grok-part.json` (see "Files
-  it writes"), deleted by Stop. Answer Once: an "always" answer leaves one Hermes allowlist entry that never
-  matches again. Pictures of the Grok window, including its list of chats, go to that chat's model provider:
-  that is the privacy cost of this path, and the reason it is optional. The message the page puts into that chat
-  holds the ticked bots' names (as data, quoted) and the request text, nothing else.
 - `pre_llm_call`, only in a twin's Hermes profile and only if "Let chats know this is a twin" (`inject_context`)
   is on: at most 10 lines of fixed wording, "your Grok twin", an opaque twin ref (`t-` plus 16 hex characters),
   the state label and counts. No bot name, description, skill, routine or any other free text from Grok.
@@ -967,12 +928,7 @@ prompt file, and stays readable on a plain home network like everything else tha
   prints a link code back; `--check` and `--plan` change nothing and do not run botport. A link code that a
   run with `--share` prints does reach the chat, and so the model's provider: it links one computer, lasts 10
   minutes and is of use only on your own private network.
-- `twin_ask_machine` (the tool behind "do X on Surface"): the model passes a computer's name and the request;
-  the result is the other computer's answer as described under "Asking a twin on another of your computers",
-  cleaned again on arrival and labelled as data, with a short status line ("done on Surface - 12 s", "not sent:
-  requests are switched off on Surface"). On the asked computer the request reaches that twin's model as an
-  ordinary chat message that begins with a fixed line naming the computer it came from.
-- `twin_transcripts_search` (only answers inside a twin's own Hermes bot, the one the chat itself belongs to even when one Hermes process serves every bot, and only after you switched full transcripts on for that twin; a chat that arrives through a messaging app, a webhook or the API server is refused, as for `twin_ask_machine`, and so is the chat turn of a request from another computer; `hermes twin transcripts` there answers only `status`, never a search): the words the model looks for, and back at most 20 excerpts (240 characters each) of that twin's own kept conversations, with side, who spoke, when and a title, anything shaped like a password or key masked and any line that looks like it states a password, PIN, code or card number, or reads like an instruction to a bot, held back whole, labelled as quotes rather than instructions. Those excerpts reach the twin's model provider, like any message in its chat. Another twin, or a Hermes bot that is not a twin, gets no excerpt. What the Hermes twin said is never given to the Grok side unless you also switch "send to Grok" on for that twin (`hermes twin transcripts to-grok-on`, separate from the archive's switch, off by default and off again whenever the archive goes off); then only conversations held in a chat on this computer (Hermes' terminal, terminal window or Desktop, by the source Hermes recorded for the chat; never one that came through a messaging app, a webhook or the API server, and never one whose source is missing or unknown) are offered, and only once the Mirror is connected, with passwords and keys masked and the same lines held back before it leaves. Stop twinning deletes the twin's kept transcripts.
+- `twin_transcripts_search` (only answers inside a twin's own Hermes bot, the one the chat itself belongs to even when one Hermes process serves every bot, and only after you switched full transcripts on for that twin; a chat that arrives through a messaging app, a webhook or the API server is refused, and so is a chat whose origin Hermes does not name or the plugin cannot read (it fails closed), and so is the chat turn of a request from another computer; `hermes twin transcripts` there answers only `status`, never a search): the words the model looks for, and back at most 20 excerpts (240 characters each) of that twin's own kept conversations, with side, who spoke, when and a title, anything shaped like a password or key masked and any line that looks like it states a password, PIN, code or card number, or reads like an instruction to a bot, held back whole, labelled as quotes rather than instructions. Those excerpts reach the twin's model provider, like any message in its chat. Another twin, or a Hermes bot that is not a twin, gets no excerpt. What the Hermes twin said is never given to the Grok side unless you also switch "send to Grok" on for that twin (`hermes twin transcripts to-grok-on`, separate from the archive's switch, off by default and off again whenever the archive goes off); then only conversations held in a chat on this computer (Hermes' terminal, terminal window or Desktop, by the source Hermes recorded for the chat; never one that came through a messaging app, a webhook or the API server, and never one whose source is missing or unknown) are offered, and only once the Mirror is connected, with passwords and keys masked and the same lines held back before it leaves. Stop twinning deletes the twin's kept transcripts.
 - In a twin's chat on a computer that is linked or shares (and only if `inject_context` is on): three more
   fixed lines with this computer's name, the names of your other computers (plain characters only) and the
   name of that tool. Nothing else.

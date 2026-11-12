@@ -9,9 +9,9 @@ import stat
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
-from . import osflags as _osflags
+from . import config, osflags as _osflags
 from .model import PLUGIN_ID, valid_id
 
 try:  # POSIX only: who owns a group (see _private_group)
@@ -25,21 +25,12 @@ _JSON_CAP = 8 * 1024 * 1024
 
 
 def hermes_root() -> Path:
-    try:
-        from hermes_constants import get_default_hermes_root
-        return Path(get_default_hermes_root())
-    except Exception:
-        env = os.environ.get("HERMES_HOME", "").strip()
-        return Path(env).expanduser() if env else Path.home() / ".hermes"
+    return config.default_hermes_root()
 
 
 def central_dir() -> Path:
     """<root>/plugin-data/grok-bot-twin (shared by every profile of this Hermes install)."""
-    try:
-        base = hermes_root() / "plugin-data" / PLUGIN_ID
-    except Exception:
-        from plugins.plugin_storage import plugin_data_dir  # fallback
-        base = Path(plugin_data_dir(PLUGIN_ID))
+    base = hermes_root() / "plugin-data" / PLUGIN_ID
     ensure_dir(base)
     return base
 
@@ -413,6 +404,9 @@ def remove_tree(base: Path, path: Path) -> None:
 _depth = 0
 
 
+# THE LOCK ORDER (one for the whole plugin): a module's own lock, if any, is taken BEFORE locked(), never while holding
+# it (else two threads can wait on each other forever); only a memory-only lock that calls nothing may be taken inside.
+# Never wait on another program under locked(): a `hermes cron` call runs outside it, and the state is read again after.
 @contextlib.contextmanager
 def locked() -> Iterator[None]:
     """Serialise writers: re-entrant thread lock + file lock (CLI, gateway, dashboard and the background
@@ -442,3 +436,12 @@ def locked() -> Iterator[None]:
                 with contextlib.suppress(OSError):
                     _osflags.unlock_file(fd)
                 os.close(fd)
+
+
+@contextlib.contextmanager
+def update(read: Callable[[], Any], write: Callable[[Any], None]) -> Iterator[Any]:
+    """`with store.update(load, save) as d:` read, change d in place, write, under locked() (an error writes nothing)."""
+    with locked():
+        data = read()
+        yield data
+        write(data)

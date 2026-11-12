@@ -531,7 +531,8 @@ def test_the_15_minute_facts_round_runs_from_the_services_own_tick_also_on_a_nev
     from hermes_plugins.grok_bot_twin.twin import fleet, service as service_mod
     calls = []
     monkeypatch.setattr(mf, "tick", lambda get: calls.append(get()))
-    svc = service_mod.TwinService.__new__(service_mod.TwinService)
+    monkeypatch.setattr(ml, "mirror_ready", lambda: True)  # (the tick calls it only with the Mirror: C2 F11)
+    svc = service_mod.get_service()
     for name in ("fleet_tick", "briefs_tick", "note_grok_app", "instructions_sync_tick"):
         monkeypatch.setattr(svc, name, lambda *a, **k: None, raising=False)
     monkeypatch.setattr(svc, "check_changed", lambda *a, **k: [], raising=False)

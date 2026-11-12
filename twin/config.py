@@ -1,9 +1,11 @@
-"""Plugin settings (plugins.entries.grok-bot-twin.settings in config.yaml), validated."""
+"""Plugin settings (plugins.entries.grok-bot-twin.settings in config.yaml), validated; and the one place the
+plugin imports Hermes' own code (see "Hermes' own code" below: every other module asks these functions)."""
 from __future__ import annotations
 
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from .model import PLUGIN_ID, valid_id
@@ -57,21 +59,7 @@ def _own_home() -> str:
     named for the current task only, so that is asked first. Without it a twin's chat in such a process took the
     process for the main folder's, read the twin's own (empty) settings through Hermes and used the default share
     port: a second share server, and "requests are switched off on NAME" while they were on."""
-    try:
-        from hermes_constants import get_hermes_home_override
-        home = str(get_hermes_home_override() or "").strip()
-        if home:
-            return home
-    except Exception:
-        pass
-    home = os.environ.get("HERMES_HOME", "").strip()
-    if not home:
-        try:
-            from hermes_constants import get_hermes_home
-            home = str(get_hermes_home())
-        except Exception:
-            home = ""
-    return home
+    return hermes_home() or os.environ.get("HERMES_HOME", "").strip()
 
 
 def _inside_a_bot() -> tuple:
@@ -116,11 +104,7 @@ def _raw() -> dict:
     # (a bot whose folder has just been moved away, an unlinked twin's say, is not asked: reading its settings
     # through Hermes would make Hermes set the folder up again)
     if root is None or os.path.isdir(home):
-        try:
-            from hermes_cli.config import load_config_readonly
-            own = _entry_settings(load_config_readonly() or {})
-        except Exception:
-            own = {}
+        own = _entry_settings(own_hermes_config())
     return {**own, **_root_settings(root)} if root is not None else own
 
 
@@ -183,3 +167,134 @@ def _bool(value: Any, default: bool) -> bool:
 
 def get(key: str) -> Any:
     return settings().get(key, DEFAULTS.get(key))
+
+
+# ---- Hermes' own code: the one place it is imported --------------------------------------------------------------------
+# Each function names what it needs from Hermes and what it does when that is missing or looks different (imported
+# when asked: Hermes is not there everywhere this runs). FAIL CLOSED: chat_not_local and skill_scan; the rest falls back.
+SURFACE_VARS = ("HERMES_SESSION_PLATFORM", "HERMES_SESSION_SOURCE")
+
+
+def default_hermes_root() -> Path:
+    """The main Hermes folder: hermes_constants.get_default_hermes_root(); without it HERMES_HOME, else ~/.hermes."""
+    try:
+        from hermes_constants import get_default_hermes_root
+        return Path(get_default_hermes_root())
+    except Exception:
+        env = os.environ.get("HERMES_HOME", "").strip()
+        return Path(env).expanduser() if env else Path.home() / ".hermes"
+
+
+def hermes_home() -> Optional[str]:
+    """This chat's Hermes folder: the bot named for the current task only (hermes_constants.get_hermes_home_override,
+    when one process serves several bots), else the process's own (get_hermes_home). None when that cannot be asked."""
+    try:
+        import hermes_constants as hc
+        return str(hc.get_hermes_home_override() or hc.get_hermes_home() or "").strip() or None
+    except Exception:
+        return None
+
+
+def profile_name(home: Any) -> Optional[str]:
+    """The name of the Hermes bot whose folder `home` is (hermes_constants.profile_name_for_home); without it only
+    a folder inside a `profiles` folder is named (by its folder name). None when it cannot be named."""
+    try:
+        from hermes_constants import profile_name_for_home
+        name = profile_name_for_home(home)
+    except Exception:
+        p = Path(str(home))
+        name = p.name if p.parent.name == "profiles" else None
+    return name if isinstance(name, str) and name else None
+
+
+def own_hermes_config() -> dict:
+    """This bot's own config.yaml as Hermes reads it (hermes_cli.config.load_config_readonly); {} without it."""
+    try:
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly()
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+def broadcast_event(etype: str, payload: dict) -> None:
+    """Tell Hermes' Desktop about an event (hermes_cli.plugin_events.broadcast_plugin_event); nothing without it
+    (the Desktop also polls /events)."""
+    try:
+        from hermes_cli.plugin_events import broadcast_plugin_event
+        broadcast_plugin_event(PLUGIN_ID, etype, payload)
+    except Exception:
+        pass
+
+
+def thread(target: Any, name: str, args: tuple = ()) -> Any:
+    """A daemon thread (not started) that keeps Hermes' per-bot context (agent.memory_provider.spawn_context_thread);
+    a plain thread without it."""
+    import threading
+    try:
+        from agent.memory_provider import spawn_context_thread
+        return spawn_context_thread(target, name=name, daemon=True, args=args)
+    except Exception:
+        return threading.Thread(target=target, name=name, daemon=True, args=args)
+
+
+def known_toolsets() -> Optional[set]:
+    """The tool sets this Hermes knows (toolsets.get_toolset_names); None when that cannot be told."""
+    try:
+        import toolsets
+        names = set(toolsets.get_toolset_names())
+        return names or None
+    except Exception:
+        return None
+
+
+def hermes_default_soul(text: str) -> bool:
+    """Is this prompt file Hermes' own starting text, never edited (hermes_cli.default_soul)? False when this Hermes
+    cannot say (the folder is then the owner's)."""
+    try:
+        from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
+        return text.strip() == DEFAULT_SOUL_MD.strip() or bool(is_legacy_template_soul(text))
+    except Exception:
+        return False
+
+
+def skill_scan(path: Any) -> Optional[str]:
+    """Hermes' skill scanner (tools.skills_guard.scan_skill) on one skill folder: 'safe', 'caution' or 'dangerous'.
+    FAILS CLOSED: None (not scanned, never "safe") when the scanner is missing, raises, or answers in a shape not
+    known here."""
+    try:
+        from tools.skills_guard import scan_skill
+        verdict = getattr(scan_skill(Path(path), source="community"), "verdict", None)
+    except Exception:
+        return None
+    return verdict if isinstance(verdict, str) and verdict in ("safe", "caution", "dangerous") else None
+
+
+def chat_not_local() -> bool:
+    """Is the chat this runs in NOT known to be on this computer? FAILS CLOSED. Hermes names a chat's origin per chat
+    (gateway.session_context.get_session_env): a messaging app, a webhook or the API server in
+    HERMES_SESSION_PLATFORM, its own terminal, terminal UI and Desktop in HERMES_SESSION_SOURCE. Local only when a
+    named origin is one of those local surfaces (slash.LOCAL_PLATFORMS), none is another, and Hermes' own answer
+    (session_is_messaging_surface), where it has one, is False. Anything Hermes cannot answer here is refused.
+
+    HERMES_GATEWAY_SESSION is deliberately NOT looked at: Hermes sets it in the process behind its own terminal
+    UI and Desktop too (it means "questions go to the interface, not to the keyboard")."""
+    from .slash import LOCAL_PLATFORMS
+    try:
+        from gateway.session_context import get_session_env  # (per chat, also when several run at once)
+        named = [get_session_env(n, "") or "" for n in SURFACE_VARS]
+        if not all(isinstance(v, str) for v in named):
+            return True
+        named = [v.strip().lower() for v in named]
+    except Exception:
+        return True
+    if not any(named) or any(v and v not in LOCAL_PLATFORMS for v in named):
+        return True
+    try:
+        from gateway.session_context import session_is_messaging_surface as says
+    except Exception:  # (an older Hermes: the named origin is all there is)
+        return False
+    try:
+        return says() is not False
+    except Exception:
+        return True

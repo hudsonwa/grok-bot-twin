@@ -348,21 +348,21 @@ def test_setup_without_gh_never_suggests_the_unsafe_flag(bp_svc, monkeypatch):
 # ---- chat: the page first, the sample marked ------------------------------------------------------------------
 def test_slash_help_and_empty_wording(svc):
     assert "[TWIN]" in slash.HELP and "PAIR" not in slash.HELP and "Twins page in Hermes Desktop" in slash.HELP
-    empty = slash.handle("")
+    empty = slash.handle("", platform="cli")
     assert empty.startswith("No twins yet. Open the Twins page in Hermes Desktop and press Connect my Grok bots.")
     assert "hermes twin add" not in empty
-    assert slash.handle("conflicts").startswith("No twins yet. Open the Twins page")
-    slash.handle("demo")
-    assert "- Acme Support [sample]: Follows Grok, checked " in slash.handle("status")
-    assert "profile" not in slash.handle("status")
-    slash.handle("demo conflict")
-    out = slash.handle("sync")
+    assert slash.handle("conflicts", platform="cli").startswith("No twins yet. Open the Twins page")
+    slash.handle("demo", platform="cli")
+    assert "- Acme Support [sample]: Follows Grok, checked " in slash.handle("status", platform="cli")
+    assert "profile" not in slash.handle("status", platform="cli")
+    slash.handle("demo conflict", platform="cli")
+    out = slash.handle("sync", platform="cli")
     assert "1 item changed in both places" in out and "Twins page" in out
-    out = slash.handle("conflicts")
+    out = slash.handle("conflicts", platform="cli")
     assert out.startswith("1 item changed in both places:") and "- greet-visitors (skill)" in out
     assert out.index("Twins page in Hermes Desktop") < out.index("hermes twin resolve")  # page first, command second
     assert "--keep hermes|grok" not in out
-    assert "Sample removed. Nothing of yours was changed." in slash.handle("demo remove")
+    assert "Sample removed. Nothing of yours was changed." in slash.handle("demo remove", platform="cli")
 
 
 def test_tools_mark_the_sample_and_point_to_the_page(svc):

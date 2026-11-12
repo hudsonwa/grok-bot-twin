@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import config, importer, safe, store, watch
+from . import config, h2g, importer, safe, store, watch
 from . import hermes_side as hs
 from . import secrets as _secrets
 from .connect import CAUSE_ERROR_CODES, BadInput, ConnectMixin
@@ -34,7 +34,7 @@ from .tasks_api import TasksMixin
 from .briefs import BriefsMixin
 from .engine import (INSTALL_HINT, TRUST_HINT, UNATTESTED_TEXT, BotportEngine, Engine, EngineError, _home_label,
                      find_botport, find_gh, tool_problem_text, valid_tag)
-from .model import (DIRECTIONS, KEEP_SIDES, MIRROR_NOTE, PLUGIN_ID, SAMPLE_PROFILE, STATE_LABELS, clean_waiting,
+from .model import (DIRECTIONS, KEEP_SIDES, MIRROR_NOTE, SAMPLE_PROFILE, STATE_LABELS, clean_waiting,
                     clean_withheld, derive_state, item_kind, normalize_pair, now_iso, pair_ref, parse_iso, plural,
                     preview_lines, preview_note, valid_id, valid_item_id)
 
@@ -228,11 +228,7 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                     return name
             except Exception:
                 pass
-        try:
-            from hermes_constants import get_hermes_home, profile_name_for_home
-            return profile_name_for_home(get_hermes_home()) or "default"
-        except Exception:
-            return "default"
+        return config.profile_name(config.hermes_home() or "") or "default"
 
     def botport(self) -> Optional[BotportEngine]:
         cfg = config.settings()
@@ -305,11 +301,8 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
     def note_grok_app(self) -> None:
         """Tell the page when the Grok app's folder went away or came back (it reads its status again on any
         event), so its notice appears and clears within seconds instead of at its next slow reading. Only on a
-        computer with real twins; the first look tells nothing. Never raises."""
+        computer with real twins (tick); the first look tells nothing. Never raises."""
         try:
-            if not self._real_pair_ids():
-                self._grok_seen = None
-                return
             found = self.grok_app_found()
             before = getattr(self, "_grok_seen", None)
             self._grok_seen = found
@@ -482,11 +475,7 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
             log.debug("grok-bot-twin: could not record event: %s", exc)
         if "tui_gateway.server" not in sys.modules:
             return  # not inside the gateway (CLI, tests): no Desktop to tell; the desktop also polls /events
-        try:
-            from hermes_cli.plugin_events import broadcast_plugin_event
-            broadcast_plugin_event(PLUGIN_ID, etype, {"pair_id": pair_id, **payload})
-        except Exception:
-            pass
+        config.broadcast_event(etype, {"pair_id": pair_id, **payload})
 
     def events(self, since: Optional[str] = None, limit: int = 100) -> dict:
         evs = store.read_jsonl(self.central / "events.jsonl")
@@ -574,6 +563,7 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                    "profile": self.profile(), "setup": setup, "sample": self.sample_state(),
                    "fleet": self.fleet_brief()}
             self._status = (time.monotonic(), out)
+            self._fold_open_conflicts(pairs)  # (after the line above: reading Grok for Hermes -> Grok reads it back)
             cache = self.central / "status-cache.json"
             if pairs or cache.exists():  # nothing is written for an install that holds no twins
                 try:
@@ -615,6 +605,31 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
         if state == p["state"]:
             return reason
         return STATE_LABELS.get(p["state"], STATE_LABELS["error"])
+
+    def _fold_open_conflicts(self, pairs: list) -> None:
+        """No twin is "Up to date" while a choice is open anywhere. botport's own conflicts are counted in
+        `conflicts`; the open ones of the instructions sync (Grok -> Hermes) and of Hermes -> Grok are listed in
+        `open_conflicts` ({"where": "instructions" | "to_grok", "item"}) and named in the state and its reason."""
+        isync = self._isync_load()["twins"]
+        h2g_used = os.path.lexists(self.central / h2g.STATE_FILE)
+        for p in pairs:
+            if p.get("demo") or p["state"] == "error":
+                continue
+            pid = p["pair_id"]
+            e = isync.get(pid) or {}
+            found = [{"where": "instructions", "item": "instructions"}] \
+                if self._isync_on(e) and e.get("state") == "conflict" else []
+            if h2g_used:
+                try:
+                    x = self._h2g(pid)
+                    held = x.preview(pid)["held"] if x.allowed(pid) else []
+                except (h2g.H2GError, EngineError, OSError, ValueError, KeyError, TypeError):
+                    log.warning("grok-bot-twin: Hermes -> Grok could not be compared for the status")
+                    held = []
+                found += [{"where": "to_grok", "item": h["item"]} for h in held if h.get("code") == "conflict"]
+            if found:
+                p["open_conflicts"] = found
+                p["state"], p["state_reason"] = derive_state(p)
 
     def _switched_view(self, entry: dict, profile: Any) -> Optional[dict]:
         sw = entry.get("switched") if isinstance(entry.get("switched"), dict) else None
@@ -860,36 +875,47 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
             if r.get("error"):
                 self.emit("sync_error", pid, {"code": r["error"]["code"], "message": r["error"]["message"]})
 
+    def has_background_work(self) -> bool:
+        """A twin (real or the sample), or a computer that shares or is linked. False on a fresh install."""
+        from . import fleet
+        return self.demo.exists() or bool(self._registry()) or fleet.exists()
+
     def tick(self) -> int:
-        """One timer cycle: metadata check, then a Grok->Hermes sync of each changed pair."""
-        self.fleet_tick()  # the safety net for sharing with, or following, the owner's other machines
-        try:
-            self.briefs_tick()  # session briefs: nothing at all while every twin's briefs are off
-        except Exception:
-            log.exception("grok-bot-twin: session briefs round failed")
-        self.note_grok_app()
-        self.instructions_sync_tick()  # Grok's instructions re-read from the newest setup exports (every 15 min)
-        try:  # memory facts with Grok (every 15 min): on any computer, linked or not; nothing until the Mirror is there
-            from . import mem_facts as _mem_facts
-            _mem_facts.tick(lambda: self)
-        except Exception:
-            log.exception("grok-bot-twin: memory facts round failed")
-        self.to_grok_tick()  # Hermes -> Grok: the Mirror's answers (files only; nothing when it was never used)
-        changed = self.check_changed()
+        """One timer cycle: the metadata check, then a Grok->Hermes sync of each changed pair; an opt-in part only
+        while it can have work (cheap looks). One failing step (the engine too) never skips the others; the first
+        failure is raised after all ran."""
+        from . import fleet, mem_facts, mem_layers as ml
+        errors: list = []
+
+        def step(fn: Any, *args: Any) -> Any:
+            try:
+                return fn(*args)
+            except Exception as exc:  # ("locked": another botport run holds the pair; next round)
+                log.debug("grok-bot-twin: a background step failed", exc_info=True)
+                if getattr(exc, "code", None) != "locked":
+                    errors.append(exc)
+
+        real = bool(self._real_pair_ids())
+        if real or fleet.exists():
+            step(self.fleet_tick)  # sharing / following; each real twin's Hermes bot keeps its note and plugin
+        if real:  # parts that only act on real twins (each at its own few-minute pace)
+            step(self.note_grok_app)
+            step(self.briefs_tick)
+            step(self.instructions_sync_tick)
+        if ml.mirror_ready():
+            step(mem_facts.tick, lambda: self)
+        if os.path.lexists(self.central / h2g.STATE_FILE):  # Hermes -> Grok was used here
+            step(self.to_grok_tick)
+        changed = step(self.check_changed) or []
         for pid in changed:
-            try:
-                self.sync(pid)
-            except EngineError as exc:
-                if exc.code == "locked":
-                    continue  # another botport run holds the pair; try next tick
-                raise
+            step(self.sync, pid)
         if changed:
-            try:
+            with contextlib.suppress(EngineError):
                 self.status(fresh=True)
-            except EngineError:
-                pass
             from . import awareness
             awareness.invalidate()
+        if errors:
+            raise errors[0]
         return len(changed)
 
     # ---- grok roster / create --------------------------------------------------------------------
@@ -1917,6 +1943,8 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                 data, blocked = {}, True
         removed = [safe.clean_name(x, 200) for x in (data.get("removed") if isinstance(data.get("removed"), list)
                                                       else [])[:100] if isinstance(x, str)]
+        to_grok = None if sample else self._h2g(pid)
+        h2g_on = to_grok is not None and bool(to_grok.allowed(pid))
         if not dry_run:
             reg = self._registry()
             entry = reg.pop(pid, None)
@@ -1945,6 +1973,10 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                     _transcripts.forget(pid)
                 except Exception:
                     log.warning("grok-bot-twin: could not delete a removed twin's full transcripts", exc_info=True)
+                try:  # its Hermes -> Grok allow and record: the Mirror may no longer change its Grok bot
+                    to_grok.forget(pid)
+                except Exception:
+                    log.warning("grok-bot-twin: could not drop a removed twin's Hermes to Grok allow", exc_info=True)
                 # the fresh status may have lost the Hermes side (botport let go first): the registry still knows it
                 was = entry.get("hermes") if isinstance(entry, dict) else None
                 prof = (st.get("hermes") or {}).get("profile") or (was.get("profile") if isinstance(was, dict) else None)
@@ -1952,6 +1984,9 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                     try:  # its memory-facts ledger, restore points and Grok stand-in (MEMORY.md / USER.md stay)
                         from . import mem_facts as _mem_facts
                         _mem_facts.forget(prof)
+                        from . import mem_layers as _ml  # and its memory layers are off (twinned again: off too)
+                        for layer in [x for x in _ml.LAYERS if _ml.settings(prof).get(x) != "off"]:
+                            _ml.set_direction(prof, layer, "off")
                     except Exception:
                         log.warning("grok-bot-twin: could not drop a removed twin's memory-facts records", exc_info=True)
             self._checked.pop(pid, None)
@@ -1969,6 +2004,7 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
             stays.append(f"Its {plural(on, 'routine')} {'keeps' if on == 1 else 'keep'} running in Hermes.")
         # (without botport the earlier versions cannot be counted: the line is said, since they would go too)
         goes = [STOP_GOES_LINK] + ([STOP_GOES_VERSIONS] if blocked or _n(st.get("restore_points")) else [])
+        goes += [h2g.STOP_GOES] if h2g_on else []
         copies = self.fleet_copies_line(pid)  # on a computer that shares: the twin leaves the linked computers too
         if copies:
             goes.append(copies)

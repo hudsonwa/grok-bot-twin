@@ -38,7 +38,6 @@ import hashlib
 import json
 import re
 import secrets as _random
-import threading
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
@@ -65,7 +64,6 @@ _CRON_NAMES = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|MON|TUE|WED|THU|F
 _CRON_WORD = r"(?:[0-9*?LW#/,-]+|(?:%s)(?:[-,/](?:[0-9]+|%s))*)" % (_CRON_NAMES, _CRON_NAMES)
 SCHEDULE_RE = re.compile(r"^%s(?: %s){4,6}\Z" % (_CRON_WORD, _CRON_WORD), re.I)
 _CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ud800-\udfff]")
-_LOCK = threading.RLock()
 
 # words for the owner (the page and the terminal show these unchanged)
 NOT_ALLOWED = "The Mirror may not change this bot in Grok: allow it first (hermes twin to-grok allow)."
@@ -107,6 +105,11 @@ EMPTY = "The {item} is empty in Hermes. Hermes never empties it in Grok: change 
 BOTH_ON = ("The routine \"{name}\" is set to run in Grok, but its Hermes copy is switched on: it would run twice. "
            "Pause it in Hermes, or choose Hermes as where it runs.")
 BAD_SCHEDULE = "The schedule of routine \"{name}\" is not a plain cron schedule, so Hermes does not send it to Grok."
+IN_GROK = ("The routine \"{name}\" runs in Grok now (Hermes to Grok moved it there), so Hermes does not switch on its "
+           "copy as well: move it back first (hermes twin to-grok runner {key} hermes).")
+MOVING = ("The routine \"{name}\" is being moved between Grok and Hermes, so Hermes does not switch on its copy now: "
+          "wait until the move is finished (hermes twin to-grok shows it).")
+MOVED = "This twin's routines changed while Hermes was being switched: nothing was switched on. Choose again."
 DISALLOWED = "You stopped Hermes to Grok for this twin, so this change is not made."
 NOT_PUBLISHED = ("Hermes could not update the list in skill sync's shared folder that tells the Mirror which bots it "
                  "may change. Open the shared folder, then stop it again; until then, also delete the rule in Grok.")
@@ -114,6 +117,8 @@ REVOKE_WHERE = "Grok: Settings > Permissions > Auto-Review > Allow without Askin
 REVOKE = ("The Mirror may no longer change this bot from Hermes. In Grok, delete exactly this rule (it is the one you "
           "added when you allowed it).")
 GRANT_WHERE = "Grok: Settings > Permissions > Auto-Review > Allow without Asking > Add rule"
+STOP_GOES = ("Hermes to Grok: the Mirror may no longer change this bot. In Grok, also delete the rule you added "
+             "for it (" + REVOKE_WHERE + ").")
 NO_ROUTINES = ("Hermes has no routines for this twin now, so Grok's are left as they are (Hermes never removes "
                "every routine at once).")
 
@@ -346,6 +351,32 @@ def effective_runners(stored: dict, hermes_routines: dict, grok_routines: Option
     return runner
 
 
+def runs_in_grok(profile: Any, name: Any) -> str:
+    """Why Hermes must not switch on a twin's own job for routine `name` in Hermes profile `profile`: this file says
+    the routine runs in Grok, or a move of it is under way; "" when nothing here stops it. Read only, under the lock,
+    which is let go before the caller runs `hermes cron`. (Rule 7: "Move routines to Hermes" and every other resume
+    go through importer.resume_cron, which asks here; the handover's own Hermes step does not.)"""
+    if not isinstance(name, str) or not name:
+        return ""
+    key, prof = routine_key(name), profile or "default"
+    with store.locked():
+        pairs = store.read_json(store.central_dir() / "pairs.json", {}) or {}
+        d = store.read_json(store.central_dir() / STATE_FILE, None)
+    if not isinstance(d, dict) or d.get("v") != V or not isinstance(d.get("runner"), dict):
+        return ""
+    pairs = pairs.get("pairs") if isinstance(pairs, dict) and isinstance(pairs.get("pairs"), list) else []
+    for p in pairs:
+        r = d["runner"].get(p.get("pair_id")) if isinstance(p, dict) else None
+        h = p.get("hermes") if isinstance(r, dict) else None
+        if not isinstance(h, dict) or (h.get("profile") or "default") != prof:
+            continue
+        if "_move:" + key in r:
+            return MOVING.format(name=safe.clean_name(name, 120))
+        if r.get(key) == "grok":
+            return IN_GROK.format(name=safe.clean_name(name, 120), key=key)
+    return ""
+
+
 def _digest(obj: Any) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
 
@@ -359,7 +390,7 @@ def _serial(fn: Callable) -> Callable:
     """One change at a time across threads and processes (CLI, page, background helper): the plugin's own lock."""
     @functools.wraps(fn)
     def run(self: Any, *a: Any, **k: Any) -> Any:
-        with _LOCK, store.locked():
+        with store.locked():
             return fn(self, *a, **k)
     return run
 
@@ -461,6 +492,10 @@ class H2G:
         d["changes"] = d["changes"][-MAX_CHANGES:]
         store.atomic_write_json(self._path(), d)
 
+    def _edit(self) -> Any:
+        """`with self._edit() as d:` read, change and write the state file under the plugin's one lock."""
+        return store.update(self._read, self._write)
+
     # -- allowlist (rule 1)
     def allowed(self, pid: str) -> list:
         a = self._read()["allow"].get(pid)
@@ -477,15 +512,13 @@ class H2G:
         bot = self._bot(pid)
         if not bot:
             raise H2GError("no_bot", "Hermes does not know which Grok bot this twin follows.")
-        with _LOCK, store.locked():
-            d = self._read()
+        with self._edit() as d:
             entry = {"items": [i for i in ITEMS if i in items], "bot": bot, "at": now_iso()}
             if isinstance(rule, str) and rule:
                 entry["rule"] = rule
             d["allow"][pid] = entry
             if pid not in d["base"]:  # the first base is Grok as the writer reads it (or Hermes now: nothing to send)
                 d["base"][pid] = self._first_base(pid, bot)
-            self._write(d)
         self._publish()
         return self.info(pid)
 
@@ -509,7 +542,7 @@ class H2G:
         (marked failed; a half-made routine move stays on the safe side), the writer's signed allowlist no longer
         names its bot, and the answer carries `revoke`: the exact rule to delete in Grok."""
         forgot: list = []
-        with _LOCK, store.locked():
+        with store.locked():
             d = self._read()
             a = d["allow"].get(pid) or {}
             keep = [] if items in ("all", None) else [i for i in (a.get("items") or []) if i not in items]
@@ -536,8 +569,8 @@ class H2G:
             fb = getattr(self.writer, "forget_bot", None)
             if not keep and bot and not still and fb is not None:
                 fb(bot)  # also a request this computer no longer has a record of
-            if forgot:
-                self.finish_moves()
+        if forgot:
+            self.finish_moves()  # (after the lock: a handover's Hermes step may run `hermes cron`)
         published = self._publish(strict=True)
         out = self.info(pid)
         if not published:
@@ -547,6 +580,27 @@ class H2G:
                              "sentence": REVOKE.format(where=REVOKE_WHERE) + ("" if published else " " + NOT_PUBLISHED),
                              "forgot": len(forgot), "published": published}
         return out
+
+    def forget(self, pid: str) -> None:
+        """Stop twinning: nothing of the twin stays here (allow, base, runner, record of changes), so the signed
+        allowlist no longer names its bot and its requests still waiting leave the shared folder (a half-made routine
+        move is not finished: it stays on the safe side, as with give_up). Nothing to forget writes nothing."""
+        with store.locked():
+            d = self._read()
+            a = d["allow"].pop(pid, None) or {}
+            hit = [d[k].pop(pid, None) is not None for k in ("base", "runner", "keep_grok")]
+            mine = [c for c in d["changes"] if c.get("pid") == pid]
+            if not (a or any(hit) or mine):
+                return
+            d["changes"] = [c for c in d["changes"] if c.get("pid") != pid]
+            self._write(d)
+            still = any(e.get("bot") == a.get("bot") for e in d["allow"].values())
+        for c in mine:  # (file deletes only, after the lock)
+            if c.get("state") == "sent" and getattr(self.writer, "forget", None):
+                self.writer.forget(c["id"])
+        if a.get("bot") and not still and getattr(self.writer, "forget_bot", None):
+            self.writer.forget_bot(a["bot"])
+        self._publish()
 
     def _first_base(self, pid: str, bot: str) -> dict:
         """What Grok holds when the owner first allows: the read-back for what the writer can read, and Hermes as it
@@ -681,8 +735,7 @@ class H2G:
         grok = read_grok(self.writer, bot)
         if grok is None or item not in grok["known"]:
             raise H2GError("no_read", "The Mirror cannot read this from Grok now, so Hermes cannot compare.")
-        with store.locked():
-            d = self._read()
+        with self._edit() as d:
             b = d["base"].setdefault(pid, {"side": clean_side({}), "at": None, "from": "hermes"})
             side = clean_side(b.get("side"))
             side[item] = grok[item]
@@ -694,7 +747,6 @@ class H2G:
                 kg[item] = _digest(clean_side(self._hermes(pid))[item])
             else:
                 kg.pop(item, None)
-            self._write(d)
         return self.preview(pid)
 
     # -- what the owner sees
@@ -802,10 +854,8 @@ class H2G:
                  "kind": plan.get("kind", "change"), "preview_id": plan.get("preview_id"),
                  "state": receipt.get("state") if receipt.get("state") in ("done", "sent", "failed") else "failed",
                  "message": safe.clean_summary(receipt.get("message"), 300)}
-        with store.locked():
-            d = self._read()
+        with self._edit() as d:
             d["changes"] = [c for c in d["changes"] if c.get("id") != entry["id"]] + [entry]
-            self._write(d)
         if entry["state"] != "sent":
             self._finish(entry, receipt)
         return {"state": entry["state"], "change_id": entry["id"], "items": entry["items"],
@@ -815,8 +865,7 @@ class H2G:
     def _finish(self, entry: dict, receipt: dict) -> None:
         """A final receipt: the base moves by the ops that were done (only those), and the panel hears of it."""
         done = set(receipt.get("done") or []) if isinstance(receipt.get("done"), list) else set()
-        with store.locked():
-            d = self._read()
+        with self._edit() as d:
             b = d["base"].setdefault(entry["pid"], {"side": clean_side({}), "at": None, "from": "hermes"})
             side = clean_side(b.get("side"))
             for i, op in enumerate(entry["ops"]):
@@ -844,7 +893,6 @@ class H2G:
                     c["state"] = "done" if receipt.get("state") == "done" else "failed"
                     c["done"] = sorted(done)
                     c["message"] = safe.clean_summary(receipt.get("message"), 300)
-            self._write(d)
         forget = getattr(self.writer, "forget", None)
         if forget is not None:  # an answered request leaves the shared folder: it can never be made again
             forget(entry["id"])
@@ -862,8 +910,7 @@ class H2G:
         same_r = g["routines"] == h["routines"] if "routines" in g["known"] else False
         if not same and not same_r:
             return
-        with store.locked():
-            d = self._read()
+        with self._edit() as d:
             b = d["base"].setdefault(pid, {"side": clean_side({}), "at": None, "from": "hermes"})
             side = clean_side(b.get("side"))
             for k in same:
@@ -873,7 +920,6 @@ class H2G:
                 side["routines"] = dict(h["routines"])
             b["side"] = {**{k: side[k] for k in TEXT_ITEMS}, "routines": list(side["routines"].values())}
             b["at"] = now_iso()
-            self._write(d)
 
     @_serial
     def poll(self) -> list:
@@ -949,12 +995,10 @@ class H2G:
             out["not_undone"] = skipped
             out["sentence"] += (" Not put back: " + ", ".join(skipped) + ". " + UNKNOWN_BEFORE)
         if out["state"] in ("done", "sent"):
-            with store.locked():
-                d = self._read()
+            with self._edit() as d:
                 for x in d["changes"]:
                     if x.get("id") == change_id:
                         x["undone_by"] = uid
-                self._write(d)
         return out
 
     def _still_allowed(self, pid: str, items: list, bot: str) -> None:
@@ -980,48 +1024,59 @@ class H2G:
             return r
         return self._runners_now(pid, d).get(rkey) or "keep"
 
-    @_serial
     def move_runner(self, pid: str, rkey: str, to: str) -> dict:
-        """Hand a routine over to Grok or back to Hermes: pause the old side first, then switch on the new one."""
+        """Hand a routine over to Grok or back to Hermes: pause the old side first, then switch on the new one.
+        Hermes' own switch (`hermes cron`, up to 30 s) runs with no lock held; the checks run again once the lock is
+        back, and nothing is switched on if this twin's routines changed meanwhile."""
         if to not in RUNNERS or not isinstance(rkey, str) or not RKEY_RE.match(rkey):
             raise H2GError("bad_input", "Say which routine, and grok or hermes.")
+        with store.locked():
+            seen = self._move_check(pid, rkey)
+            if self.runner(pid, rkey) == to:
+                return {"state": "done", "runner": to, "sentence": f"It already runs in {to.capitalize()}."}
+        if to == "grok" and not self._pause(pid, rkey):  # step 1: Hermes stops first, or nothing happens
+            raise H2GError("hermes_not_paused", "Hermes could not pause its copy of this routine, so it is not "
+                                                "switched on in Grok.")
+        with store.locked():
+            if self._move_check(pid, rkey) != seen:
+                raise H2GError("moved", MOVED)
+            bot, base = seen[1], clean_side(seen[2])
+            if to == "grok":
+                self._set_runner(pid, rkey, "nowhere")
+            op = {"op": "routine.enable", "key": rkey, "enabled": to == "grok"}
+            cid = _new_id({"move": rkey, "to": to})
+            receipt = self.writer.apply(bot, [op], cid)
+            plan = {"change_id": cid, "bot": bot, "ops": [op], "_base": base, "changes": [{"item": f"routine:{rkey}"}],
+                    "kind": "move"}
+            out = self._record(pid, plan, receipt, undo_of=None)
+            if out["state"] == "failed":
+                # to Grok: Hermes is paused and Grok did not start -> runs nowhere (honest, never twice)
+                out["runner"] = "nowhere" if to == "grok" else "grok"
+                out["sentence"] = ("Grok did not switch it on; Hermes stays paused, so it runs nowhere until you try "
+                                   "again or move it back." if to == "grok" else
+                                   "Grok did not pause it, so Hermes does not switch it on.")
+                return out
+            self._set_pending_move(pid, rkey, to, cid)  # (also when done: no other move starts until it completes)
+            if out["state"] == "sent":
+                out["runner"] = "nowhere"
+                return out
+        return self._complete_move(pid, rkey, to, out)
+
+    def _move_check(self, pid: str, rkey: str) -> tuple:
+        """Under the lock: refuse a move now (not allowed, a change or move of this twin still waiting, the routine not
+        in Grok), else what the move depends on: the same answer twice means nothing changed in between."""
         if "routines" not in self.allowed(pid):
             raise H2GError("not_allowed", ITEM_NOT_ALLOWED.format(item="routines"))
         d = self._read()
         self._still_allowed(pid, ["routines"], (d["allow"].get(pid) or {}).get("bot") or self._bot(pid))
-        if any(x.get("pid") == pid and x.get("state") == "sent" for x in d["changes"]):
+        r = d["runner"].get(pid) or {}
+        if "_move:" + rkey in r or any(x.get("pid") == pid and x.get("state") == "sent" for x in d["changes"]):
             raise H2GError("pending", PENDING)
-        bot = (d["allow"].get(pid) or {}).get("bot") or self._bot(pid)
-        base = clean_side((d["base"].get(pid) or {}).get("side"))
-        if rkey not in base["routines"]:
+        base = (d["base"].get(pid) or {}).get("side")
+        if rkey not in clean_side(base)["routines"]:
             raise H2GError("not_in_grok", "This routine is not in Grok yet: send it to Grok first (it arrives paused).")
-        if self.runner(pid, rkey) == to:
-            return {"state": "done", "runner": to, "sentence": f"It already runs in {to.capitalize()}."}
-        if to == "grok":
-            if not self._pause(pid, rkey):  # step 1: Hermes stops first, or nothing happens
-                raise H2GError("hermes_not_paused", "Hermes could not pause its copy of this routine, so it is not "
-                                                    "switched on in Grok.")
-            self._set_runner(pid, rkey, "nowhere")
-            op = {"op": "routine.enable", "key": rkey, "enabled": True}
-        else:
-            op = {"op": "routine.enable", "key": rkey, "enabled": False}
-        cid = _new_id({"move": rkey, "to": to})
-        receipt = self.writer.apply(bot, [op], cid)
-        plan = {"change_id": cid, "bot": bot, "ops": [op], "_base": base, "changes": [{"item": f"routine:{rkey}"}],
-                "kind": "move"}
-        out = self._record(pid, plan, receipt, undo_of=None)
-        if out["state"] == "failed":
-            # to Grok: Hermes is paused and Grok did not start -> runs nowhere (honest, never twice)
-            out["runner"] = "nowhere" if to == "grok" else "grok"
-            out["sentence"] = ("Grok did not switch it on; Hermes stays paused, so it runs nowhere until you try "
-                               "again or move it back." if to == "grok" else
-                               "Grok did not pause it, so Hermes does not switch it on.")
-            return out
-        if out["state"] == "sent":
-            out["runner"] = "nowhere"
-            self._set_pending_move(pid, rkey, to, cid)
-            return out
-        return self._complete_move(pid, rkey, to, out)
+        return (r, (d["allow"].get(pid) or {}).get("bot") or self._bot(pid), base,
+                [x["id"] for x in d["changes"] if x.get("pid") == pid])
 
     def _complete_move(self, pid: str, rkey: str, to: str, out: dict) -> dict:
         if to == "hermes":
@@ -1036,57 +1091,50 @@ class H2G:
         return out
 
     def _set_runner(self, pid: str, rkey: str, to: str) -> None:
-        with store.locked():
-            d = self._read()
+        with self._edit() as d:
             r = d["runner"].setdefault(pid, {})
-            if to == "nowhere":
-                r[rkey] = "nowhere"
-            else:
-                r[rkey] = to
+            r[rkey] = to
             r.pop("_move:" + rkey, None)
-            self._write(d)
 
     def _set_pending_move(self, pid: str, rkey: str, to: str, cid: str) -> None:
-        with store.locked():
-            d = self._read()
+        with self._edit() as d:
             d["runner"].setdefault(pid, {})["_move:" + rkey] = {"to": to, "change": cid}
-            self._write(d)
 
-    @_serial
     def give_up(self, pid: str) -> dict:
         """Stop waiting for a Mirror that does not answer: its requests leave the shared folder (if it has not copied
         them yet, it never makes them), the base does not move, and a half-made routine move stays on the safe side
         (to Grok: Hermes stays paused; to Hermes: Hermes is not switched on)."""
-        d = self._read()
-        mine = [c for c in d["changes"] if c.get("pid") == pid and c.get("state") == "sent"]
-        if not mine:
-            return {"state": "done", "sentence": "Nothing is waiting for the Mirror."}
-        forget = getattr(self.writer, "forget", None)
-        for c in mine:
-            c["state"], c["message"] = "failed", GAVE_UP
-            if forget is not None:
-                forget(c["id"])
-        self._write(d)
+        with store.locked():
+            d = self._read()
+            mine = [c for c in d["changes"] if c.get("pid") == pid and c.get("state") == "sent"]
+            if not mine:
+                return {"state": "done", "sentence": "Nothing is waiting for the Mirror."}
+            forget = getattr(self.writer, "forget", None)
+            for c in mine:
+                c["state"], c["message"] = "failed", GAVE_UP
+                if forget is not None:
+                    forget(c["id"])
+            self._write(d)
         self.finish_moves()
         self._publish()  # the cancelled ids leave the signed list: the box never makes them, even from a saved copy
         return {"state": "done", "sentence": GAVE_UP, "gave_up": [c["id"] for c in mine]}
 
-    @_serial
     def finish_moves(self) -> list:
-        """After poll(): a handover whose Grok step is done now completes its Hermes step."""
+        """After poll(): a handover whose Grok step is done now completes its Hermes step (after the lock: it may run
+        `hermes cron`; its `_move:` mark keeps any other move of that routine waiting until then)."""
         self.poll()
-        out = []
-        d = self._read()
-        for pid, r in d["runner"].items():
-            for k, v in list(r.items()):
-                if not k.startswith("_move:") or not isinstance(v, dict):
-                    continue
-                c = next((c for c in d["changes"] if c.get("id") == v.get("change")), None)
-                if c is None or c.get("state") == "sent":
-                    continue
-                rkey = k[6:]
-                if c.get("state") == "done":
-                    out.append(self._complete_move(pid, rkey, v["to"], {"state": "done", "change_id": c["id"]}))
-                else:
-                    self._set_runner(pid, rkey, "nowhere" if v["to"] == "grok" else "grok")
-        return out
+        todo = []
+        with store.locked():
+            d = self._read()
+            for pid, r in d["runner"].items():
+                for k, v in list(r.items()):
+                    if not k.startswith("_move:") or not isinstance(v, dict):
+                        continue
+                    c = next((c for c in d["changes"] if c.get("id") == v.get("change")), None)
+                    if c is not None and c.get("state") == "sent":
+                        continue
+                    if c is not None and c.get("state") == "done":
+                        todo.append((pid, k[6:], v.get("to"), c["id"]))
+                    else:  # failed, or its record is gone: the safe side
+                        self._set_runner(pid, k[6:], "nowhere" if v.get("to") == "grok" else "grok")
+        return [self._complete_move(pid, rkey, to, {"state": "done", "change_id": cid}) for pid, rkey, to, cid in todo]

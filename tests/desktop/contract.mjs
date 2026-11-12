@@ -136,8 +136,7 @@ const FIXTURE_SHAPES = {
   'unlink-plan': 'Leaving',
   'unlink-computer-plan': 'Leaving',
   'setup-export': 'SetupExportInfo',
-  batch: 'BatchInfo',
-  'computer-use': 'ComputerUse'
+  batch: 'BatchInfo'
 }
 // Named answers in the section. A name not listed here is classified by what it holds (below).
 const NAMED_SHAPES = {
@@ -147,8 +146,7 @@ const NAMED_SHAPES = {
   sourceOk: 'Source', keptRanger: 'RemovedTwin', unlinkPlan: 'Leaving', unlinkSurfacePlan: 'Leaving',
   briefNone: 'FleetBrief', briefSource: 'FleetBrief', briefFollower: 'FleetBrief',
   exportInfo: 'SetupExportInfo', exportInfoLast: 'SetupExportInfo', exportPlain: 'SetupExport', exportFull: 'SetupExport', exportOther: 'SetupExport', exportDone: 'SetupExport',
-  cuOff: 'ComputerUse', cuOn: 'ComputerUse', batchInfo: 'BatchInfo', batchModels: 'BatchModels', batchDownloads: 'BatchDownloads', batchImport: 'BatchImport',
-  grokPartOk: 'GrokPart', grokPartOff: 'GrokPart'
+  batchInfo: 'BatchInfo', batchModels: 'BatchModels', batchDownloads: 'BatchDownloads', batchImport: 'BatchImport'
 }
 // Names that are parts or helpers, not answers.
 const NOT_ANSWERS = new Set(['iso', 'coverage', 'calm', 'noRoutines', 'ready', 'setupBase', 'fixtures', 'ACME_SAYS', 'EXAMPLE', 'FILE', 'same', 'differs', 'onRows', 'SCOUT', 'QUILL', 'sharedTwin', 'seenFrom', 'hereRows', 'hereTwin', 'EXPORT_REQUEST', 'EXPORT_PRIVACY', 'EXPORT_TEXT'])
@@ -199,7 +197,7 @@ if (mock.noRoutines) check({ ...mock.noRoutines }, 'PairRoutines', 'noRoutines')
 for (const [i, row] of (mock.coverage ?? []).entries()) check(row, 'CoverageRow', `coverage[${i}]`)
 
 // the answers the harness must have for this check to mean anything
-for (const must of ['statusAll', 'statusFirstRun', 'setupNoBotport', 'setupUnchecked', 'setupReady', 'acme', 'recipe', 'fleetNone', 'fleetNoneOther', 'fleetCode', 'fleetSource2', 'fleetBehind', 'fleetShareError', 'fleetFollower', 'fleetFollowerOffline', 'fleetFollowerSharingOff', 'fleetFollowerError', 'fleetUnlinked', 'statusSource', 'statusFollower', 'exportInfo', 'exportPlain', 'exportFull', 'exportDone', 'batchInfo', 'batchDownloads', 'cuOff', 'cuOn']) {
+for (const must of ['statusAll', 'statusFirstRun', 'setupNoBotport', 'setupUnchecked', 'setupReady', 'acme', 'recipe', 'fleetNone', 'fleetNoneOther', 'fleetCode', 'fleetSource2', 'fleetBehind', 'fleetShareError', 'fleetFollower', 'fleetFollowerOffline', 'fleetFollowerSharingOff', 'fleetFollowerError', 'fleetUnlinked', 'statusSource', 'statusFollower', 'exportInfo', 'exportPlain', 'exportFull', 'exportDone', 'batchInfo', 'batchDownloads']) {
   if (!(must in mock)) problems.push(`the fixtures section no longer defines \`${must}\``)
 }
 for (const must of Object.keys(FIXTURE_SHAPES)) {

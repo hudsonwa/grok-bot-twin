@@ -6,6 +6,10 @@ pause written here cannot be overwritten by Hermes' scheduler saving an older pi
 way round). A lock that cannot be had in time raises OSError and nothing is written: a routine is never reported
 as paused when the pause may not have reached the file.
 
+The plugin's one reading (`parse`, also for importer.py and fleet_profiles.py) and only writer of that file. Not
+through `hermes cron`: it cannot mark a pause as the plugin's (`paused_reason`) or a copy as one (COPY_KEY). A shape
+`parse` does not know is refused with a clear message, never guessed at or written over.
+
 Standard library only, so it works where Hermes itself is not importable (the standalone tools, the tests).
 Nothing here starts a routine by itself: `resume` only clears the pause; Hermes' scheduler works out the next
 run from the schedule, as it does for every job whose next run is missing.
@@ -52,26 +56,49 @@ def stamp(home: Path) -> tuple:
     return (st.st_mtime_ns, st.st_size)
 
 
+UNKNOWN_SHAPE = "Hermes' routines file (cron/jobs.json) is not in the shape this plugin knows"
+
+
+def parse(raw: Any) -> tuple:
+    """(the whole document, its jobs) of Hermes' jobs file, read as JSON: `{"jobs": [job, ...], ...}` (or the bare
+    list of jobs Hermes itself still reads), at most MAX_JOBS jobs, each an object with a text "id" whose
+    "enabled", "state" and "paused_reason", where present, are a yes/no, a text and a text (or null): the fields
+    this module reads and changes. Raises ValueError (UNKNOWN_SHAPE and what is off) for anything else."""
+    doc = {"jobs": raw} if isinstance(raw, list) else raw
+    if not isinstance(doc, dict) or not isinstance(doc.get("jobs"), list):
+        raise ValueError(f"{UNKNOWN_SHAPE}: no list of jobs")
+    jobs = doc["jobs"]
+    if len(jobs) > MAX_JOBS:
+        raise ValueError(f"{UNKNOWN_SHAPE}: more than {MAX_JOBS} jobs")
+    for j in jobs:
+        if not (isinstance(j, dict) and isinstance(j.get("id"), str) and j["id"]
+                and isinstance(j.get("enabled", True), bool) and isinstance(j.get("state", ""), (str, type(None)))
+                and isinstance(j.get("paused_reason"), (str, type(None)))):
+            raise ValueError(f"{UNKNOWN_SHAPE}: a job without an id, or with fields of another kind")
+    return doc, list(jobs)
+
+
 def _read(home: Path) -> tuple:
-    """(the whole document, its jobs). (None, None) when the file is there and cannot be understood: then
-    nothing is concluded from it and nothing is written over it. ({}, []) when there is no file."""
+    """(the whole document, its jobs); ({}, []) when there is no file. Raises OSError when the file is there and
+    cannot be read or understood: then nothing is concluded from it and nothing is written over it."""
     path = jobs_file(home)
     if not os.path.lexists(path):
         return {}, []
     raw = fio.read_json(path, None)
-    if isinstance(raw, list):
-        raw = {"jobs": raw}
-    if not isinstance(raw, dict):
-        return None, None
-    jobs = raw.get("jobs", [])
-    if not isinstance(jobs, list) or len(jobs) > MAX_JOBS:
-        return None, None
-    return raw, [j for j in jobs if isinstance(j, dict)]
+    if raw is None:
+        raise OSError("Hermes' routines file (cron/jobs.json) cannot be read")
+    try:
+        return parse(raw)
+    except ValueError as exc:
+        raise OSError(str(exc)) from None
 
 
 def load(home: Path) -> Optional[list]:
-    """The bot's jobs; [] when it has none; None when its file cannot be read (never guessed at)."""
-    return _read(home)[1]
+    """The bot's jobs; [] when it has none; None when its file cannot be read or understood (never guessed at)."""
+    try:
+        return _read(home)[1]
+    except OSError:
+        return None
 
 
 def runnable(job: Any) -> bool:
@@ -134,13 +161,10 @@ def edit(home: Path, fn: Callable[[list], Any]) -> Any:
     (changed, result). Raises OSError when the lock cannot be had or the file cannot be understood."""
     with _locked(home):
         doc, jobs = _read(home)
-        if jobs is None:
-            raise OSError("the routines file cannot be read")
         changed, result = fn(jobs)
         if changed:
-            others = [j for j in (doc.get("jobs") or []) if not isinstance(j, dict)] if isinstance(doc, dict) else []
             out = dict(doc)
-            out["jobs"] = jobs + others
+            out["jobs"] = jobs
             out["updated_at"] = _now()
             fio.write_text(jobs_file(home), json.dumps(out, indent=2, ensure_ascii=False) + "\n")
         return result

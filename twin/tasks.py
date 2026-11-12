@@ -23,12 +23,9 @@ The rules, each enforced here or named where it is:
   state and a duration. No transcript, no tool output, no file, no session id, no path of the plugin's own.
 - A step that needs the owner's approval waits for the owner of the ASKED computer: the question Hermes asks
   (tasks_turn.py) is kept in `tasks-approvals.json` on that computer, shown on its Twins page, and answered only
-  from there ("once" or "deny"). Neither the question nor the power to answer it ever travels, unless the owner
-  chose otherwise ON that computer (`mode`, below).
+  from there ("once" or "deny"). Neither the question nor the power to answer it ever travels.
 - What happens when a step needs approval is that computer's own setting, in the same file as its switch and
-  as local as the switch: "here" (the default, the rule above), "linked" (the computer that asked is shown the
-  step and may answer it too: the answer names the question's mark, travels signed over the link, counts only
-  while that question is open, and is logged on both computers), or "safe" (such a step is refused at once).
+  as local as the switch: "here" (the default, the rule above) or "safe" (such a step is refused at once).
   No route, no request and no other computer can set it; a request's own chat turn cannot either.
 - Every request is written to this computer's log (`tasks-log.json`, the newest LOG_CAP): on the asking
   computer, on the asked computer, and on the sharing computer when it only passes one along. The Twins page
@@ -63,20 +60,13 @@ TURN_MARK_S = 3600                # a mark left behind by a Hermes that ended is
 CHOICES = ("once", "deny")   # what the owner of the asked computer may answer; never "for this session" or "always"
 SWITCH_LABEL = "Let my other computers ask this one to do things"
 # What this computer does when a step of a request needs approval. Chosen on this computer only (set_mode).
-MODES = ("here", "linked", "safe")
+MODES = ("here", "safe")
 MODE_LABEL = "When a step needs approval"
 MODE_CHOICES = (
     ("here", "Ask on this computer", "A step waits until you answer it here."),
-    ("linked", "Let my own linked computers approve", "The computer that asked shows the step and can answer it "
-                                                      "too."),
     ("safe", "Only safe requests", "A step that would need approval is refused at once. Requests that only read "
                                    "still work."),
 )
-# The one sentence shown before "linked" is turned on (page and terminal).
-MODE_WARNING = ("With this on, a step can be approved from the computer that asked for it, with nobody at this "
-                "computer, so turn it on only if you would let whoever sits at any of your linked computers, and "
-                "any chat there that may run commands without asking, decide for this one.")
-ASKING_FILE = "tasks-asking.json"   # steps on other computers that this computer may answer (see set_asking)
 MARK_RE = re.compile(r"[0-9a-f]{8}")
 REQUEST_CAP = 2000        # characters of one request
 REPLY_CAP = 6000          # characters of one answer
@@ -100,8 +90,7 @@ STATES = OPEN_STATES + END_STATES
 CODES = ("tasks_off", "tasks_unreachable", "unknown_machine", "ask_self", "no_twin_there", "too_long", "empty",
          "too_many", "busy", "not_linked", "task_timeout", "task_failed", "no_hermes", "approval_denied",
          "approval_timeout", "unknown_task", "switched_off", "stopped", "clock_off", "local_only", "passed_on",
-         "step_changed", "not_from_a_request", "only_safe", "approve_there", "answer_owner_only",
-         "mode_owner_only")
+         "step_changed", "not_from_a_request", "only_safe", "answer_owner_only")
 # Set for the chat turn of a request that came from another computer (tasks_run.turn_env). Such a turn cannot ask
 # a further computer and cannot answer an approval question, its own included.
 ASKED_ENV = "GROK_BOT_TWIN_ASKED_TURN"
@@ -131,8 +120,9 @@ MESSAGES = {
     "unknown_task": ("That request is no longer known.", "Ask again."),
     "switched_off": ("Requests were switched off on {name} while this one waited.", ""),
     "stopped": ("Hermes on {name} stopped before the request finished.", "Ask again."),
-    "local_only": ("Requests to your other computers can only be sent from Hermes on this computer.",
-                   "Ask from a chat in Hermes on your computer, not from a messaging app."),
+    "local_only": ("Requests to your other computers are sent only by you, from Hermes on this computer.",
+                   "Type /twin ask yourself in a Hermes chat on this computer (not a messaging app), or run "
+                   "hermes twin ask in a terminal of your own."),
     "passed_on": ("This request came from another of your computers, so it is not passed on to a third.",
                   "Ask that computer directly."),
     "step_changed": ("The step that waits for you is not the one you answered.",
@@ -141,13 +131,8 @@ MESSAGES = {
                            "Answer on this computer's Twins page or in a terminal of your own."),
     "only_safe": ("{name} takes only safe requests, so a step that needed approval was refused at once.",
                   "To allow such steps, change \"" + MODE_LABEL + "\" on {name} (Twins page)."),
-    "approve_there": ("That step can only be answered on {name}.",
-                      "Answer it on {name} (Twins page), or choose \"Let my own linked computers approve\" there."),
     "answer_owner_only": ("Only you can answer that step, not a chat.",
-                          "Type /twin approve or /twin deny in the chat yourself, or use this computer's Twins page "
-                          "or a terminal of your own."),
-    "mode_owner_only": ("Only you can let other computers approve steps on this one, not a chat.",
-                        "Choose it on this computer's Twins page, or in a terminal of your own."),
+                          "Use this computer's Twins page or a terminal of your own."),
     "clock_off": ("The clocks of your computers differ by more than 15 minutes, so the request was not accepted.",
                   "Set the date and time to automatic on this computer and on the one with the Grok app."),
 }
@@ -286,8 +271,7 @@ def step_text(value: Any, cap: int = STEP_CAP) -> str:
     is hidden as everywhere else, but a file path is shown: as one word, a long path with digits in it looks
     random to that filter, and an owner asked to approve "rm -rf [not shown]" cannot decide. Each
     part of a path is still checked by itself, and what follows a word like `token=` is never taken for a path.
-    This text stays on this computer (the asking computer only hears that a step waits), unless the owner chose
-    "Let my own linked computers approve" here: then the computer that asked is shown it too."""
+    This text stays on this computer (the asking computer only hears that a step waits)."""
     if not isinstance(value, str):
         return ""
     value = value[: cap * 4].replace("\u27e6", "(").replace("\u27e7", ")")
@@ -354,36 +338,32 @@ def link_kind(st: dict) -> Optional[str]:
 
 
 def mode() -> str:
-    """What this computer does when a step of a request needs approval: "here", "linked" or "safe". Read from
-    this computer's own file every time. Anything but a stored "linked" or "safe" is "here": a missing,
-    unreadable or damaged file never lets another computer answer."""
+    """What this computer does when a step of a request needs approval: "here" or "safe". Read from this
+    computer's own file every time. Anything but a stored "safe" is "here": a missing, unreadable or damaged
+    file, and a "linked" stored by an older version (approving from another computer, removed), all mean the
+    owner answers on this computer."""
     try:
         raw = fio.read_json(_switch_path(), None)
     except Exception:
         return "here"
     value = raw.get("mode") if isinstance(raw, dict) else None
-    return value if isinstance(value, str) and value in ("linked", "safe") else "here"
+    return "safe" if value == "safe" else "here"
 
 
 def mode_view() -> dict:
-    return {"value": mode(), "label": MODE_LABEL, "warning": MODE_WARNING,
+    return {"value": mode(), "label": MODE_LABEL,
             "choices": [{"value": v, "label": lab, "note": note} for v, lab, note in MODE_CHOICES]}
 
 
-def set_mode(value: Any, own_page: bool = False, typed: bool = False) -> str:
+def set_mode(value: Any, own_page: bool = False) -> str:
     """The owner of THIS computer chooses the mode. There is no other way to set it: no route of the share
     server and no request carries it. Refused inside the chat turn of a request from another computer (a
-    request must not be able to loosen the rule its own steps wait under), and "linked" is refused for a
-    command a chat started: the owner's page, own terminal or own typed command turns it on. Both refusals
-    go by the marks Hermes puts in a chat's environment; a chat that may run any command unasked can remove
-    them, which is the limit the disclosure states for every refusal of this kind.
-    `own_page`: called by this computer's Twins page (see decide). `typed`: the owner typed it."""
+    request must not be able to loosen the rule its own steps wait under).
+    `own_page`: called by this computer's Twins page (see decide)."""
     if not isinstance(value, str) or value not in MODES:
-        raise ValueError("mode must be here, linked or safe")
+        raise ValueError("mode must be here or safe")
     if asked_turn(env=not own_page):
         raise TaskError("not_from_a_request")
-    if value == "linked" and not own_page and not typed and _chat_numbers():
-        raise TaskError("mode_owner_only")
     with fleet.locked():
         cur = switch()
         if mode() != value:
@@ -391,8 +371,6 @@ def set_mode(value: Any, own_page: bool = False, typed: bool = False) -> str:
             if value != "here":
                 doc["mode"] = value
             fio.write_json(_switch_path(), doc)
-            if value != "linked":
-                _unshare_pending()
     return mode()
 
 
@@ -422,16 +400,13 @@ def link_dropped() -> None:
     one does, with requests off until the owner says otherwise. Called from fleet.drop_link with the store's
     lock held. Never raises."""
     try:
-        was = mode()
-        if switch()["on"] or was == "linked":
-            # "Let my own linked computers approve" ends with the link it was given for; the stricter "Only safe
-            # requests" stays (an unlink, which the sharing computer can cause, never loosens anything)
+        if switch()["on"]:
+            # the stricter "Only safe requests" stays (an unlink, which the sharing computer can cause, never
+            # loosens anything)
             doc: dict = {"on": False, "since": None}
-            if was == "safe":
+            if mode() == "safe":
                 doc["mode"] = "safe"
             fio.write_json(_switch_path(), doc)
-        if asking():
-            fio.write_json(_asking_path(), {"asking": {}})
         if heard():
             fio.write_json(_heard_path(), {"machines": {}})
     except Exception:
@@ -580,41 +555,6 @@ def log_update(direction: str, task_id: str, state: str, code: Optional[str] = N
         log.debug("grok-bot-twin: could not update the request log", exc_info=True)
 
 
-def log_answered(direction: str, task_id: str, choice: str, by: Any) -> None:
-    """Note on a logged request that one of its steps was answered from the computer that asked (mode "linked"):
-    what was answered and on which computer. Written on the asking computer when its answer was accepted, on
-    the asked computer when it took the answer, on the sharing computer when it passed one along. Never raises."""
-    if choice not in CHOICES:
-        return
-    try:
-        with _log_lock, fleet.locked():
-            rows = read_log()
-            for r in rows:
-                if r.get("id") == task_id and r.get("dir") == direction:
-                    r["answered"] = {"choice": choice, "by": fp.machine_name(by), "at": now_iso()}
-                    fio.write_json(_log_path(), {"entries": rows[-LOG_CAP:]})
-                    return
-    except Exception:
-        log.debug("grok-bot-twin: could not note the answer in the request log", exc_info=True)
-
-
-def _answered(row: dict) -> Optional[dict]:
-    a = row.get("answered")
-    if isinstance(a, dict) and a.get("choice") in CHOICES and isinstance(a.get("by"), str):
-        return {"choice": a["choice"], "by": fp.machine_name(a["by"])}
-    return None
-
-
-def _answered_tail(direction: str, answered: Optional[dict]) -> str:
-    if not answered:
-        return ""
-    did = "approved" if answered["choice"] == "once" else "refused"
-    if direction == "out":  # (what was sent from here; whether it counted is in the asked computer's own list)
-        return "; you answered a step from this computer: " + ("do it once" if answered["choice"] == "once"
-                                                                else "don't")
-    return f"; a step was {did} from {answered['by']}"
-
-
 def log_view(limit: int = 50) -> list:
     """The log for the page and the terminal: newest first, closed shape, every text cleaned again."""
     out = []
@@ -626,10 +566,6 @@ def log_view(limit: int = 50) -> list:
         peer = fp.machine_name(r.get("peer"))
         peer_to = fp.machine_name(r.get("peer_to")) if r.get("peer_to") else None
         where = peer_to if d == "relay" else (peer if d == "out" else None)
-        answered = _answered(r)
-        # (a step refused from the asking computer: said once, by the tail, not twice)
-        shown = None if answered and answered["choice"] == "deny" and code == "approval_denied" else code
-        tail = _answered_tail(d, answered)
         out.append({"id": r["id"] if TASK_ID_RE.match(r["id"]) else "k-0000000000000000", "dir": d, "peer": peer,
                     "peer_to": peer_to, "twin": short(r.get("twin"), 100), "text": short(r.get("text")),
                     "state": state, "code": code,
@@ -637,10 +573,8 @@ def log_view(limit: int = 50) -> list:
                     "ended_at": r.get("ended_at") if parse_iso(r.get("ended_at")) else None,
                     "seconds": r.get("seconds") if isinstance(r.get("seconds"), int) else None,
                     "reply": short(r.get("reply")),
-                    "label": (label(state, where, r.get("seconds"), shown) if where else in_label(state, shown))
-                    + tail,
-                    "approval": waiting.get(r["id"]) if d == "in" and state == "waiting_approval" else None,
-                    "answered": answered})
+                    "label": label(state, where, r.get("seconds"), code) if where else in_label(state, code),
+                    "approval": waiting.get(r["id"]) if d == "in" and state == "waiting_approval" else None})
         if len(out) >= limit:
             break
     return out
@@ -726,12 +660,10 @@ def _approvals() -> dict:
     return out
 
 
-def set_pending(task_id: str, question: Optional[dict], shared: bool = False) -> Optional[dict]:
+def set_pending(task_id: str, question: Optional[dict]) -> Optional[dict]:
     """Remember (or, with None, forget) the question Hermes asks about one request. An older answer for that
-    request is dropped either way, so an answer always belongs to the question that is open. `shared`: this
-    very question is also shown to the computer that asked (mode "linked" when it opened); only such a question
-    can be answered from there. Returns the question as kept ({"command", "description", "q"}), or None.
-    Never raises."""
+    request is dropped either way, so an answer always belongs to the question that is open. Returns the
+    question as kept ({"command", "description", "q"}), or None. Never raises."""
     kept = None
     try:
         with _log_lock, fleet.locked():
@@ -745,110 +677,12 @@ def set_pending(task_id: str, question: Optional[dict], shared: bool = False) ->
                 kept = {"command": step_text(question.get("command")),
                         "description": short(question.get("description")), "asked_at": now_iso(),
                         "q": _token.token_hex(4)}
-                if shared is True:
-                    kept["shared"] = True
                 doc["pending"][task_id] = kept
             fio.write_json(_approvals_path(), doc)
     except Exception:
         log.debug("grok-bot-twin: could not note the approval question", exc_info=True)
         return None
     return dict(kept) if kept else None
-
-
-def _unshare_pending() -> None:
-    """The mode is no longer "linked": no open question can be answered from another computer any more.
-    Called with the store's lock held."""
-    try:
-        doc = _approvals()
-        if any(q.pop("shared", None) for q in doc["pending"].values()):
-            fio.write_json(_approvals_path(), doc)
-    except Exception:
-        log.debug("grok-bot-twin: could not take back the shared questions", exc_info=True)
-
-
-def decide_remote(task_id: Any, choice: Any, q: Any, by: Any) -> bool:
-    """An answer that the computer which ASKED gave to the open question of its own request, arrived through
-    the link (tasks_run checks who sent it; this function is called by this computer's worker only, never by a
-    route, a command or a chat). It counts only when all of this holds, each read from this computer's own
-    files at this moment: the mode is "linked"; that question is open, was shown to the asking computer, and
-    carries exactly this mark; nobody has answered it yet (the owner here comes first). True when it counted."""
-    if choice not in CHOICES or not isinstance(task_id, str) or not TASK_ID_RE.match(task_id) \
-            or not isinstance(q, str) or not MARK_RE.fullmatch(q):
-        return False
-    try:
-        with _log_lock, fleet.locked():
-            if mode() != "linked":
-                return False
-            doc = _approvals()
-            p = doc["pending"].get(task_id)
-            if p is None or p.get("shared") is not True or task_id in doc["decisions"] or not hmac.compare_digest(
-                    q.encode("utf-8"), str(p.get("q") or "").encode("utf-8")):
-                return False
-            doc["decisions"][task_id] = {"choice": choice, "at": now_iso(), "by": fp.machine_name(by)}
-            fio.write_json(_approvals_path(), doc)
-            return True
-    except Exception:
-        log.debug("grok-bot-twin: could not take the answer from the asking computer", exc_info=True)
-        return False
-
-
-# ---- steps on OTHER computers that this computer may answer (mode "linked" there) ------------------------------------------
-def _asking_path():
-    return store.central_dir() / ASKING_FILE
-
-
-def clean_question(raw: Any) -> Optional[dict]:
-    """{"q", "command", "description"} of a step as it may travel and as it is read again: the mark of the
-    fleet's own kind, the step through the same filter as on the asked computer (password-like text hidden,
-    capped at what is shown). None for anything else, and for a step with nothing to show."""
-    if not isinstance(raw, dict) or not isinstance(raw.get("q"), str) or not MARK_RE.fullmatch(raw["q"]):
-        return None
-    if isinstance(raw.get("command"), str) and len(raw["command"]) > STEP_CAP * 4:
-        return None
-    command = step_text(raw.get("command"))
-    description = short(raw.get("description"))
-    if not command and not description:
-        return None
-    return {"q": raw["q"], "command": command, "description": description}
-
-
-def asking() -> dict:
-    """{task id: {"q", "command", "description", "asked_at"}}: steps that wait on another computer for a request
-    asked from this one, which that computer lets this one answer. An entry is dropped when the question is
-    (set_asking) and by itself after the longest time a question may stay open."""
-    raw = fio.read_json(_asking_path(), None)
-    rows = raw.get("asking") if isinstance(raw, dict) else None
-    out = {}
-    for tid, row in (rows.items() if isinstance(rows, dict) else ()):
-        q = clean_question(row)
-        at = parse_iso(row.get("asked_at")) if isinstance(row, dict) else None
-        if isinstance(tid, str) and TASK_ID_RE.match(tid) and q and at is not None \
-                and 0 <= (now_dt() - at).total_seconds() <= APPROVAL_LIMIT_S + 60:
-            out[tid] = {**q, "asked_at": row["asked_at"]}
-    return out
-
-
-def set_asking(task_id: str, question: Optional[dict]) -> bool:
-    """Keep (or, with None, forget) the step another computer showed this one for its own request. True when
-    a step that was not known yet is now kept. Never raises."""
-    try:
-        with _log_lock, fleet.locked():
-            rows = asking()
-            had = rows.get(task_id)
-            q = clean_question(question) if question is not None else None
-            if q is None:
-                if had is None:
-                    return False
-                rows.pop(task_id, None)
-            elif had is not None and had["q"] == q["q"]:
-                return False
-            else:
-                rows[task_id] = {**q, "asked_at": now_iso()}
-            fio.write_json(_asking_path(), {"asking": dict(list(rows.items())[-20:])})
-            return q is not None
-    except Exception:
-        log.debug("grok-bot-twin: could not note the step that waits on another computer", exc_info=True)
-        return False
 
 
 def pending() -> dict:
@@ -1004,10 +838,6 @@ def decide(task_id: Any, choice: Any, q: Optional[str] = None, own_page: bool = 
             raise TaskError("unknown_task")
         if q is not None and not (isinstance(q, str) and q and hmac.compare_digest(
                 q.encode("utf-8"), str(doc["pending"][task_id].get("q") or "").encode("utf-8"))):
-            raise TaskError("step_changed")
-        if isinstance(doc["decisions"].get(task_id), dict) and doc["decisions"][task_id].get("by"):
-            # the computer that asked has answered this step already (mode "linked") and the answer is on its
-            # way to Hermes: the first answer counts, in both directions
             raise TaskError("step_changed")
         doc["decisions"][task_id] = {"choice": choice, "at": now_iso()}
         fio.write_json(_approvals_path(), doc)

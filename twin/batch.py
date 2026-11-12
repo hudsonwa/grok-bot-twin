@@ -10,8 +10,6 @@ the backend of the sheet that does both for all ticked twins together.
 
 A file's text lives for the length of one call: it is never written, logged or echoed (events carry counts). The
 only thing kept about a file in Downloads is a sha256 digest of its name, size and time, so it is not imported twice.
-
-The Grok part done by Hermes itself (computer use) is twin/grok_part.py; the three methods at the end hand over to it.
 """
 from __future__ import annotations
 
@@ -53,7 +51,6 @@ NO_TWIN_WHY = "No ticked twin is for the bot in this file."
 NO_TWIN_MANY = "No ticked twin is for any of the {n} bots in this file."
 TWO_TWINS_WHY = "Two ticked twins have this bot's name; import this file into one twin at a time."
 DUP_WHY = "Another file is for the same twin; that one is used."
-NOT_BUILT = "not built"
 
 
 def model_id(value: Any) -> Optional[str]:
@@ -250,8 +247,7 @@ class BatchMixin:
                 "endpoints": eps,
                 "twins": twins, "downloads": {"available": downloads_dir() is not None, "label": "Downloads"},
                 "skill_sync": {"set_up": skill_sync.shared_root(self.central) is not None,
-                               "pair_ids": [p for p in ss["twins"] if p in ids][:PIDS_MAX]},
-                "computer_use": self.computer_use_status()}
+                               "pair_ids": [p for p in ss["twins"] if p in ids][:PIDS_MAX]}}
 
     # ---- the model -----------------------------------------------------------------------------------------
     def _endpoint_choice(self, endpoint: Any, m: str) -> Optional[dict]:
@@ -568,36 +564,3 @@ class BatchMixin:
         del new_files
         return {"files": n_files, "results": results,
                 "waiting": [r["pair_id"] for r in real if r["pair_id"] not in covered]}
-
-    # ---- the Grok part done by Hermes (twin/grok_part.py) ----------------------------------------------------------
-    @staticmethod
-    def _grok_part() -> Any:
-        try:
-            from . import grok_part
-        except ImportError:
-            return None
-        return grok_part
-
-    def computer_use_status(self) -> dict:
-        gp = self._grok_part()
-        if gp is None or not hasattr(gp, "status"):
-            return {"available": False, "driver": False, "toolset": False, "approvals": False, "enable": [],
-                    "why": NOT_BUILT}
-        return gp.status(store.hermes_root())
-
-    def grok_part_handoff(self, pids: Any) -> dict:
-        rows = [r for r in self._batch_rows(pids, need=True) if not r["sample"]]
-        gp = self._grok_part()
-        if gp is None or not hasattr(gp, "handoff"):
-            return {"ok": False, "message": "", "status": self.computer_use_status()}
-        if not rows:  # (the sample twin, or nothing ticked: the same answer shape, nothing handed over)
-            return {"ok": False, "message": "",
-                    "status": {**self.computer_use_status(), "why": "Tick at least one twin of your own bots."}}
-        return gp.handoff(self.central, store.hermes_root(),
-                          [{"pair_id": r["pair_id"], "name": r["name"]} for r in rows], sx.REQUEST)
-
-    def grok_part_stop(self) -> dict:
-        gp = self._grok_part()
-        if gp is not None and hasattr(gp, "stop"):
-            gp.stop(self.central)
-        return {"ok": True}

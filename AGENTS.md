@@ -111,8 +111,7 @@ with Hermes and this plugin; no Grok app and no botport needed there), run
   (`hermes twin fleet memory TWIN on`), any row of a twin's What syncs panel (`hermes twin syncs TWIN ITEM DIRECTION`;
   looking with `hermes twin syncs TWIN` is fine), a twin's full transcripts or sending them to Grok
   (`hermes twin transcripts on`, `to-grok-on`), session briefs (`hermes twin briefs --way both`, and `--forget` deletes
-  them), Grok's instructions from Downloads (`hermes twin instructions downloads on`), the model setting (`hermes twin fleet settings model on`), and approval
-  from linked computers (`hermes twin requests mode linked`), and changes made in Grok by the Mirror bot
+  them), Grok's instructions from Downloads (`hermes twin instructions downloads on`), the model setting (`hermes twin fleet settings model on`), and changes made in Grok by the Mirror bot
   (off for every twin until your owner runs `hermes twin to-grok TWIN allow`; `apply` only after your owner saw
   the preview and said yes; these refuse a command a chat started). Each is your owner's
   decision. Skill sync also spends Grok credit on every run.

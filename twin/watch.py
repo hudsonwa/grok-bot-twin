@@ -30,6 +30,8 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import config
+
 log = logging.getLogger(__name__)
 
 CACHE_SUBDIR = "sand-client-persistence"
@@ -314,11 +316,7 @@ def ensure_started(folder_fn: Callable[[], Optional[Path]], on_change: Callable[
         if _thread is not None and _thread.is_alive():
             return False
         w = Watcher(folder_fn, on_change)
-        try:
-            from agent.memory_provider import spawn_context_thread  # keeps HERMES_HOME/profile contextvars
-            t = spawn_context_thread(w.run, name="grok-bot-twin-watch", daemon=True)
-        except Exception:
-            t = threading.Thread(target=w.run, name="grok-bot-twin-watch", daemon=True)
+        t = config.thread(w.run, "grok-bot-twin-watch")
         t.start()
         _watcher, _thread = w, t
         return True

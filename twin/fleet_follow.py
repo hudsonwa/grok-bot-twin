@@ -710,11 +710,7 @@ def ensure_started(get_service: Callable, watch_idle: bool = False) -> bool:
             return False
         if not watch_idle and not _linked():
             return False  # nothing to follow: no thread at all for a machine that is not linked
-        try:
-            from agent.memory_provider import spawn_context_thread  # keeps Hermes' own context
-            t = spawn_context_thread(_loop, name="grok-bot-twin-follow", daemon=True, args=(get_service,))
-        except Exception:
-            t = threading.Thread(target=_loop, name="grok-bot-twin-follow", daemon=True, args=(get_service,))
+        t = config.thread(_loop, "grok-bot-twin-follow", (get_service,))
         t.start()
         _thread = t
         return True

@@ -273,39 +273,45 @@ ok(JSON.stringify(H.restCalls[0].opts.body) === JSON.stringify({ choice: 'once' 
 html = renderWaiting({ ...onView, waiting: [{ ...waiting, command: '<img src=x onerror=1> && rm', peer: '<b>mini</b>', text: '<script>alert(1)</script>' }, { ...waiting, id: '../../x' }, 'junk', null] })
 ok(html.includes('<img src=x onerror=1> && rm') && html.includes('<script>alert(1)</script>') && H.buttons.filter(b => b.text === 'Do it once').length === 1, 'waiting: untrusted text is shown as text, a malformed entry is not shown at all')
 
-// ── 4b. what happens here when a step needs approval: three choices ────────
+// ── 4b. what happens here when a step needs approval: two choices ──────────
+// ("Let my own linked computers approve" was removed in 0.3.4: an older backend that still offers it is not
+// followed, test_c2_f5.py)
 
-const WARNING = 'Anyone who can use one of your linked computers can then approve a step that runs on this one.'
 const MODE = {
   choices: [
     { label: 'Ask on this computer', note: 'A step waits until you answer it here.', value: 'here' },
-    { label: 'Let my own linked computers approve', note: 'The computer that asked shows the step and can answer it too.', value: 'linked' },
     { label: 'Only safe requests', note: 'A step that would need approval is refused at once. Requests that only read still work.', value: 'safe' }
   ],
   label: 'When a step needs approval',
-  value: 'here',
-  warning: WARNING
+  value: 'here'
 }
-const modeView = { ...onView, asking: [], mode: MODE }
+const modeView = { ...onView, mode: MODE }
 const modeIs = value => ({ ...modeView, mode: { ...MODE, value } })
 const radios = () => H.raw.match(/<input[^>]*type="radio"[^>]*>/g) ?? []
 
 // not shown while the switch is off, and not on a backend that does not know the setting
-html = render({ ...base, asking: [], mode: MODE })
+html = render({ ...base, mode: MODE })
 ok(H.modes.length === 0 && radios().length === 0 && !H.raw.includes('radiogroup') && !html.includes(MODE.label) && !html.includes('Only safe requests'), `switch off: no word about approvals beside it (${html})`)
 html = render(onView)
 ok(H.modes.length === 0 && radios().length === 0 && !H.raw.includes('radiogroup') && !html.includes('When a step needs approval'), 'an older backend (no mode): the choice is not shown at all')
-ok(P.tasksOf(onView).mode.value === 'here' && P.tasksOf(onView).mode.choices.length === 0 && P.tasksOf(onView).asking.length === 0, 'an older backend: asks here, as before, and nothing waits elsewhere')
+ok(P.tasksOf(onView).mode.value === 'here' && P.tasksOf(onView).mode.choices.length === 0 && !('asking' in P.tasksOf(onView)), 'an older backend: asks here, as before')
+// a backend from before 0.3.4 that still offers "linked" (or says it is in force): never offered, read as asking here
+{
+  const old = { ...onView, asking: [{ id: 'k-00000000000000cc', q: '4d5e6f70', command: 'echo hello' }], mode: { ...MODE, choices: [MODE.choices[0], { label: 'Let my own linked computers approve', note: 'x', value: 'linked' }, MODE.choices[1]], value: 'linked', warning: 'w' } }
+  const t = P.tasksOf(old)
+  ok(t.mode.value === 'here' && JSON.stringify(t.mode.choices.map(c => c.value)) === JSON.stringify(['here', 'safe']) && !('asking' in t) && !('warning' in t.mode), `an older backend's "linked": not offered, read as asking here (${JSON.stringify(t.mode)})`)
+  ok(renderWaiting(old) === '', 'an older backend\'s step on another computer: not shown, nothing to answer from here')
+}
 
-// on: one group with its name, three choices, each with its one line; the one in force is checked
+// on: one group with its name, two choices, each with its one line; the one in force is checked
 html = render(modeView)
 ok(H.raw.includes('role="radiogroup"') && H.raw.includes('aria-label="When a step needs approval"') && html.includes('When a step needs approval'), 'on: one group of choices, named for the eye and for a screen reader')
-ok(JSON.stringify(H.modes.map(m => [m.choice.value, m.choice.label, m.checked, m.disabled])) === JSON.stringify([['here', 'Ask on this computer', true, false], ['linked', 'Let my own linked computers approve', false, false], ['safe', 'Only safe requests', false, false]]), `on: three choices, the one in force is checked (${JSON.stringify(H.modes.map(m => [m.choice.value, m.checked]))})`)
+ok(JSON.stringify(H.modes.map(m => [m.choice.value, m.choice.label, m.checked, m.disabled])) === JSON.stringify([['here', 'Ask on this computer', true, false], ['safe', 'Only safe requests', false, false]]), `on: two choices, the one in force is checked (${JSON.stringify(H.modes.map(m => [m.choice.value, m.checked]))})`)
 ok(MODE.choices.every(c => html.includes(c.label) && html.includes(c.note)) && html.indexOf('On.') < html.indexOf(MODE.label) && html.indexOf(MODE.label) < html.indexOf('How to ask from here'), 'on: each choice with its one line, directly under the switch')
-ok(radios().length === 3 && radios().every(r => r.includes('name="gbt-tasks-mode"') && /id="gbt-tasks-mode-(here|linked|safe)"/.test(r) && /aria-describedby="gbt-tasks-mode-(here|linked|safe)-note"/.test(r) && /aria-labelledby="gbt-tasks-mode-(here|linked|safe)-label"/.test(r)) && H.raw.includes('<span class="break-words text-[0.8125rem] leading-snug text-(--ui-text-primary)" id="gbt-tasks-mode-safe-label">Only safe requests</span>') && radios().filter(r => /\schecked=""/.test(r)).length === 1 && (H.raw.match(/<label[^>]*for="gbt-tasks-mode-/g) ?? []).length === 3, `on: three radio buttons under one name, each with its label (${radios().join(' ')})`)
-ok(H.confirms.length === 0 && !html.includes(WARNING) && !H.raw.includes('role="dialog"'), 'on: nothing is asked before the owner chooses')
+ok(radios().length === 2 && radios().every(r => r.includes('name="gbt-tasks-mode"') && /id="gbt-tasks-mode-(here|safe)"/.test(r) && /aria-describedby="gbt-tasks-mode-(here|safe)-note"/.test(r) && /aria-labelledby="gbt-tasks-mode-(here|safe)-label"/.test(r)) && H.raw.includes('<span class="break-words text-[0.8125rem] leading-snug text-(--ui-text-primary)" id="gbt-tasks-mode-safe-label">Only safe requests</span>') && radios().filter(r => /\schecked=""/.test(r)).length === 1 && (H.raw.match(/<label[^>]*for="gbt-tasks-mode-/g) ?? []).length === 2, `on: two radio buttons under one name, each with its label (${radios().join(' ')})`)
+ok(H.confirms.length === 0 && !H.raw.includes('role="dialog"'), 'on: nothing is asked before the owner chooses')
 render(modeIs('safe'))
-ok(JSON.stringify(H.modes.map(m => m.checked)) === JSON.stringify([false, false, true]), 'the backend says which choice is in force')
+ok(JSON.stringify(H.modes.map(m => m.checked)) === JSON.stringify([false, true]), 'the backend says which choice is in force')
 
 // "Only safe requests": at once, one call, the answer is shown
 H.restCalls = []
@@ -329,32 +335,6 @@ H.modes.find(m => m.choice.value === 'safe').onChoose('safe')
 await tick()
 ok(H.restCalls.length === 0, 'the choice already in force: no call')
 
-// "Let my own linked computers approve": nothing is sent until the owner has read the backend's sentence and said yes
-H.restCalls = []
-render(modeView)
-H.modes.find(m => m.choice.value === 'linked').onChoose('linked')
-await tick()
-ok(H.restCalls.length === 0, 'letting other computers approve: choosing it sends nothing')
-html = render(modeView, { initialConfirm: true })
-ok(H.confirms.length === 1 && H.confirms[0].title === 'Let your linked computers approve steps here?' && H.confirms[0].description === WARNING && H.confirms[0].confirmLabel === 'Let them approve' && H.confirms[0].cancelLabel === 'Cancel' && H.confirms[0].destructive !== true, `the question: the backend's own sentence, two plain answers (${JSON.stringify(H.confirms.map(c => [c.title, c.description]))})`)
-ok(html.includes(WARNING) && H.raw.includes('role="alertdialog"') && JSON.stringify(H.buttons.map(b => b.text).filter(t => t !== 'How to ask from here')) === JSON.stringify(['Cancel', 'Let them approve']) && H.restCalls.length === 0, 'the question is on screen with its sentence; still nothing sent')
-// Cancel (the button, Escape): nothing is sent
-H.buttons.find(b => b.text === 'Cancel').onClick()
-H.confirms[0].onClose()
-await tick()
-ok(H.restCalls.length === 0, 'Cancel: nothing is sent')
-const linkedView = modeIs('linked')
-H.restReply = async () => linkedView
-H.setData = []
-await H.confirms[0].onConfirm()
-await tick()
-ok(H.restCalls.length === 1 && H.restCalls[0].path === '/tasks/mode' && JSON.stringify(H.restCalls[0].opts.body) === JSON.stringify({ mode: 'linked' }) && H.setData.some(([k, v]) => k === 'tasks' && v === linkedView), `Let them approve: one call (${JSON.stringify(H.restCalls)})`)
-render(linkedView)
-ok(JSON.stringify(H.modes.map(m => m.checked)) === JSON.stringify([false, true, false]) && H.confirms.length === 0, 'afterwards: that choice is checked, no question left open')
-// (without the sentence that says what it means, that choice is not offered; the other two are)
-render({ ...modeView, mode: { ...MODE, warning: '' } }, { initialConfirm: true })
-ok(JSON.stringify(H.modes.map(m => m.choice.value)) === JSON.stringify(['here', 'safe']) && H.confirms.length === 0, 'no warning sentence from the backend: other computers cannot be let in from here')
-
 // a refusal by the backend: said as a toast, in its own words
 H.notes = []
 H.restReply = async () => ({ error: { code: 'internal', hint: 'Try again.', message: 'Something went wrong inside Grok Bot Twin.' } })
@@ -365,74 +345,18 @@ ok(H.notes.length === 1 && H.notes[0].kind === 'error' && H.notes[0].title === '
 
 // the fold's first line says what is true under each choice
 ok(render(modeView, { initialHow: true }).includes('Your twins on your other computers can ask their copies here to do things. Hermes asks for your approval here, by the same rules as in your own chats.'), 'asking here: the line as before')
-html = render(linkedView, { initialHow: true })
-ok(html.includes('Your twins on your other computers can ask their copies here to do things. Hermes asks for your approval here or on the computer that asked, by the same rules as in your own chats.') && !html.includes('Hermes asks for your approval here, by'), `other computers may approve: the line says so (${html})`)
 html = render(safeView, { initialHow: true })
 ok(html.includes('Your twins on your other computers can ask their copies here to do things. A step that would need your approval is refused at once.') && !html.includes('Hermes asks for your approval'), 'only safe requests: the line says so')
 ok(render({ ...safeView, switch: base.switch }, { initialHow: true }).includes('When on, your twins on your other computers can ask their copies here to do things. A step that would need your approval is refused at once.'), 'off: the line says what would hold when on')
-ok([modeView, linkedView, safeView].every(v => sentences(render(v, { initialHow: true }).replace(LABEL, '')).every(s => words(s) <= 22)), 'no sentence over 22 words under any choice')
+ok([modeView, safeView].every(v => sentences(render(v, { initialHow: true }).replace(LABEL, '')).every(s => words(s) <= 22)), 'no sentence over 22 words under any choice')
 
 // what the backend sends is tidied: an unknown value means asking here; junk is dropped; markup stays text
 {
   const t = P.tasksOf({ ...onView, mode: { choices: [{ label: '<b>Ask</b> here', note: 'x'.repeat(500), value: 'here' }, { label: 'Twice', note: '', value: 'here' }, { label: 'Other', note: '', value: 'always' }, { label: '', note: '', value: 'safe' }, null, 'junk'], label: 7, value: 'always', warning: 'w'.repeat(900) } })
-  ok(t.mode.value === 'here' && t.mode.label === 'When a step needs approval' && t.mode.warning.length === 300 && JSON.stringify(t.mode.choices.map(c => [c.value, c.label])) === JSON.stringify([['here', '<b>Ask</b> here']]) && t.mode.choices[0].note.length === 200, `mode, tidied (${JSON.stringify(t.mode.choices.map(c => c.value))})`)
-  html = render({ ...onView, mode: { ...MODE, choices: [{ label: '<b>Ask</b> here', note: '<i>n</i>', value: 'here' }, MODE.choices[2]] } })
+  ok(t.mode.value === 'here' && t.mode.label === 'When a step needs approval' && !('warning' in t.mode) && JSON.stringify(t.mode.choices.map(c => [c.value, c.label])) === JSON.stringify([['here', '<b>Ask</b> here']]) && t.mode.choices[0].note.length === 200, `mode, tidied (${JSON.stringify(t.mode.choices.map(c => c.value))})`)
+  html = render({ ...onView, mode: { ...MODE, choices: [{ label: '<b>Ask</b> here', note: '<i>n</i>', value: 'here' }, MODE.choices[1]] } })
   ok(html.includes('<b>Ask</b> here') && html.includes('<i>n</i>') && !H.raw.includes('<b>Ask</b>'), 'a choice is shown as text')
 }
-
-// ── 4c. a step that waits on another computer, which this one may answer ───
-
-const asking = { asked_at: iso(0), command: 'rm -f /tmp/gbt-sandbox/does-not-exist-41 <b>x</b>', description: 'delete a file', id: 'k-00000000000000cc', peer: 'mini', q: '4d5e6f70', text: 'clear the old note', twin: 'Test Scout' }
-const askView = { ...modeView, asking: [asking], log: [row({ dir: 'out', id: asking.id, label: 'waiting for approval on mini', state: 'waiting_approval', text: asking.text })] }
-
-ok(renderWaiting(modeView) === '', 'nothing waits here or elsewhere: nothing at the top of the page')
-html = renderWaiting(askView)
-ok(askView.waiting.length === 0 && html.includes('mini asks before it does one step for your request to Test Scout: clear the old note') && html.includes('One step needs your approval: delete a file.'), `a step on another computer is shown though nothing waits here (${html})`)
-ok(html.includes('rm -f /tmp/gbt-sandbox/does-not-exist-41 <b>x</b>') && H.raw.includes('does-not-exist-41 &lt;b&gt;x&lt;/b&gt;</code>') && !H.raw.includes('<b>x</b>'), 'the step: the exact command, as text')
-ok(html.includes('Nothing happens on mini until then. You can also answer on mini.') && H.raw.includes('role="alert"') && H.raw.includes('aria-label="Your request to mini waits for your approval"'), 'it says where the step waits, and that it can be answered there too')
-ok(JSON.stringify(H.buttons.map(b => [b.text, b.label, b.variant])) === JSON.stringify([['Do it once', 'Do it once: the step on mini', 'secondary'], ["Don't", "Don't do the step on mini", 'text']]), `two answers, each named with the computer (${JSON.stringify(H.buttons.map(b => [b.text, b.label, b.variant]))})`)
-ok(!/always|for this session|every time|remember/i.test(html), 'no standing permission is offered')
-ok(!render(askView).includes('does-not-exist-41'), 'shown once, at the top, not again next to the switch')
-// the page's one main button: the first step of all, and a step that waits here comes first
-renderWaiting(askView, { lead: true })
-ok(JSON.stringify(H.buttons.map(b => b.variant)) === JSON.stringify(['default', 'text']), 'leading the page by itself: its "Do it once" is the main button')
-html = renderWaiting({ ...askView, waiting: [waiting] }, { lead: true })
-ok(html.indexOf('mini asked Test Scout here') < html.indexOf('mini asks before it does one step') && JSON.stringify(H.buttons.map(b => b.variant)) === JSON.stringify(['default', 'text', 'secondary', 'text']), 'with a step that waits here: that one comes first and holds the main button')
-ok(H.queries[0].refetchInterval({ state: { data: askView } }) === 2000, 'while it waits the page looks again every 2 s')
-
-for (const [label, choice, said] of [['Do it once', 'once', 'Sent to mini: do that one step once.'], ["Don't", 'deny', "Sent to mini: don't do that step."]]) {
-  H.restCalls = []
-  H.notes = []
-  H.restReply = async () => modeView
-  renderWaiting(askView)
-  await H.buttons.find(b => b.text === label).onClick()
-  await tick()
-  ok(H.restCalls.length === 1 && H.restCalls[0].path === `/tasks/${asking.id}/answer` && H.restCalls[0].opts.method === 'POST' && JSON.stringify(H.restCalls[0].opts.body) === JSON.stringify({ choice, q: '4d5e6f70' }), `${label}, for a step elsewhere: one call with "${choice}" and the mark of the step shown (${JSON.stringify(H.restCalls)})`)
-  ok(H.notes.length === 1 && H.notes[0].message === said && H.notes[0].kind === (choice === 'once' ? 'success' : 'info'), `${label}: says what happens now, and where (${JSON.stringify(H.notes)})`)
-}
-
-// an entry without the mark of its step is not shown (the answer always carries it); nor one with another id
-html = renderWaiting({ ...askView, asking: [{ ...asking, q: undefined }, { ...asking, q: 'XYZ' }, { ...asking, id: '../../x' }, 'junk', null] })
-ok(html === '' && H.buttons.length === 0, 'no mark, or a malformed entry: not shown at all')
-ok(P.tasksOf({ ...askView, asking: Array.from({ length: 9 }, (_, i) => ({ ...asking, command: 'echo hello '.repeat(60), id: `k-${String(i).padStart(16, '0')}` })) }).asking.length === 5 && P.tasksOf({ ...askView, asking: [{ ...asking, command: 'echo hello '.repeat(60) }] }).asking[0].command.length === 400, 'at most five, and a command of at most 400 characters')
-
-// the step changed meanwhile: read again, and say why nothing was done
-H.restCalls = []
-H.notes = []
-H.invalidated = 0
-H.restReply = async () => ({ error: { code: 'step_changed', hint: 'Look at it again, then answer.', message: 'The step that waits for you is not the one you answered.' } })
-renderWaiting(askView)
-await H.buttons.find(b => b.text === 'Do it once').onClick()
-await tick()
-ok(H.invalidated === 1 && H.notes.length === 1 && H.notes[0].kind === 'error' && H.notes[0].title === 'Could not pass your answer on' && H.notes[0].message === 'The step that waits for you is not the one you answered.', `a step elsewhere changed: read again (${JSON.stringify(H.notes)})`)
-// that computer takes its answers itself by now: said in the backend's words, nothing read again for it
-H.notes = []
-H.invalidated = 0
-H.restReply = async () => ({ error: { code: 'approve_there', hint: '', message: 'That step can only be answered on mini.' } })
-renderWaiting(askView)
-await H.buttons.find(b => b.text === "Don't").onClick()
-await tick()
-ok(H.invalidated === 0 && H.notes.length === 1 && H.notes[0].kind === 'error' && H.notes[0].message === 'That step can only be answered on mini.', 'not allowed from here any more: said plainly')
 
 // ── 5. the list of requests ─────────────────────────────────────────────────
 
@@ -458,7 +382,7 @@ ok(render({ ...onView, log: Array.from({ length: 60 }, (_, i) => row({ id: `k-${
 
 // ── 6. words ────────────────────────────────────────────────────────────────
 
-const all = [render(base), render(onView), renderWaiting(waitView), render(waitView, { initialOpen: true }), render(logView, { initialOpen: true }), render(modeView, { initialConfirm: true, initialHow: true }), render(linkedView, { initialHow: true }), render(safeView, { initialHow: true }), renderWaiting(askView)].join(' ')
+const all = [render(base), render(onView), renderWaiting(waitView), render(waitView, { initialOpen: true }), render(logView, { initialOpen: true }), render(modeView, { initialHow: true }), render(safeView, { initialHow: true })].join(' ')
 const visible = all.replace(/rm -f \.\/does-not-exist-7c1e\/old-note\.txt/g, '').replace(/rm -f \/tmp\/gbt-sandbox\/does-not-exist-41 <b>x<\/b>/g, '')
 
 for (const w of ['token', 'relay', 'mailbox', 'stdio', 'machine', 'pass ', 'server', 'port', 'payload', 'config', 'json', 'follower', 'source', 'null', 'undefined', ' id ', 'k-0', 'queued', 'waiting_approval']) {
@@ -483,17 +407,11 @@ P.toastTasks({ count: 1, what: 'needs_approval' })
 ok(H.notes.length === 1, 'no toast while the Twins page is on screen: the page itself shows it')
 P.setPageOpen(0)
 
-// a step on another computer waits for an answer from here: its own toast, only while the page is closed
+// "needs_answer" (a step on another computer, removed in 0.3.4) makes no toast
 H.notes = []
 P.toastTasks({ count: 1, what: 'needs_answer' })
-ok(H.notes.length === 1 && H.notes[0].id.endsWith(':tasks:asking') && H.notes[0].kind === 'warning' && H.notes[0].message === 'A step on another computer waits for your approval' && H.notes[0].meta === 'A request you sent needs one step approved. Open Twins to answer.' && H.notes[0].action?.label === 'Open Twins', `a step elsewhere waits and the page is closed: one toast that opens the page (${JSON.stringify(H.notes)})`)
-ok(words(H.notes[0].meta) <= 22 && !/mini|Surface|rm -f/.test(JSON.stringify(H.notes[0])), 'that toast names no computer and no command either')
-P.toastTasks({ count: 1, what: 'needs_approval' })
-ok(H.notes.length === 2 && H.notes[1].id.endsWith(':tasks:waiting') && H.notes[1].id !== H.notes[0].id, 'the two kinds of waiting have their own toasts: one does not replace the other')
+ok(H.notes.length === 0, 'no toast for a step on another computer: nothing is answered from here')
 P.setPageOpen(1)
-P.toastTasks({ count: 1, what: 'needs_answer' })
-ok(H.notes.length === 2, 'no such toast while the Twins page is on screen')
-P.setPageOpen(0)
 
 rmSync(work, { force: true, recursive: true })
 console.log(`requests check: ${passed} assertions passed`)

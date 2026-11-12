@@ -31,7 +31,7 @@ from typing import Any, Callable, Optional
 
 from . import fleet_io as fio
 from . import hermes_side as hs
-from . import store
+from . import config, routines_jobs, store
 from .model import PLUGIN_ID
 
 TWIN_BEGIN = "<!-- grok-bot-twin:begin twin -->"
@@ -241,26 +241,9 @@ _OWNER_DIRS = ("memories", "workspace", "home", "plans", "skins", "skills", "ses
 _OWNER_DIR_BOOKKEEPING = {"skills": (".curator_state",)}
 
 
-def _hermes_default_soul(text: str) -> bool:
-    """Is this prompt file Hermes' own starting text, never edited? Asked of Hermes itself; "no" when this
-    Hermes cannot say."""
-    try:
-        from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
-    except Exception:
-        return False
-    try:
-        return text.strip() == DEFAULT_SOUL_MD.strip() or bool(is_legacy_template_soul(text))
-    except Exception:
-        return False
-
-
 def _has_jobs(home: Path) -> bool:
-    path = home / "cron" / "jobs.json"
-    if not os.path.lexists(path):
-        return False
-    raw = fio.read_json(path, None)
-    jobs = raw.get("jobs") if isinstance(raw, dict) else raw
-    return not (isinstance(jobs, (list, dict)) and not jobs)  # unreadable counts as "has jobs"
+    jobs = routines_jobs.load(home)
+    return jobs is None or bool(jobs)  # unreadable counts as "has jobs"
 
 
 def is_leftover(home: Path, patient: bool = True) -> bool:
@@ -284,7 +267,7 @@ def is_leftover(home: Path, patient: bool = True) -> bool:
             return False
         if os.path.lexists(home / "SOUL.md"):
             text = fio.read_text(home / "SOUL.md", hs.SOUL_CAP)
-            if text is None or (text.strip() and not _hermes_default_soul(text)):
+            if text is None or (text.strip() and not config.hermes_default_soul(text)):
                 return False
         for sub in _OWNER_DIRS:
             if os.path.lexists(home / sub):

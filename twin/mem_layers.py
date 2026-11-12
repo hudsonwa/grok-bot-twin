@@ -200,14 +200,7 @@ def held_words(counts: dict) -> list:
 def mask_secrets(text: str) -> str:
     """For a whole transcript kept on this computer: suspected keys masked where they are; a line that looks like
     it states a password or code is replaced whole (its words are kept nowhere)."""
-    text = _secrets.redact(text, "[secret]")
-    out = []
-    for line in text.split("\n"):
-        if line.strip() and xs_memory._holds_secret(line):
-            out.append("[line held back: looks like it holds a password or key]")
-        else:
-            out.append(line)
-    return "\n".join(out)
+    return _secrets.redact(text, "[secret]", "[line held back: looks like it holds a password or key]")
 
 
 # ---- between the owner's computers: the 0.2 sealed box, one key per layer ---------------------------------------------

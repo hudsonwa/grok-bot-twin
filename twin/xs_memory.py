@@ -185,47 +185,8 @@ def unseal(link_key: bytes, way: str, machine_id: str, bind: str, sealed: Any, c
 
 
 # ---- which notes may travel --------------------------------------------------------------------------------------------
-# Stricter than the plugin's general password-and-key check, because memory is prose: "the wifi password is ...".
-# A note that trips any of these stays on the computer it is on (whole; it is never masked, a masked note would
-# come back and replace the real one). Words that almost always name a secret hold the note as soon as a value
-# follows; vaguer words (token, login) only when a value with a digit follows.
-_B, _E = r"(?<![A-Za-z0-9])", r"(?![A-Za-z0-9])"
-_STRONG = (
-    r"pass ?words?|passwd|pass ?phrases?|pass ?codes?|pass ?keys?|pwd?|pin(?: ?codes?| ?numbers?)?|api[ _-]?keys?|"
-    r"access[ _-]?keys?|licen[cs]e[ _-]?keys?|private[ _-]?keys?|seed(?: ?phrases?| words)?|mnemonic|"
-    r"recovery (?:codes?|phrases?|keys?|words)|backup codes?|security (?:codes?|answers?)|credentials?|"
-    r"(?:door|gate|alarm|access|entry|lock|safe|unlock|verification|auth(?:entication)?|one[ -]?time)[ _-]?codes?|"
-    r"security questions?|wallet (?:words|phrase)|otp|2fa|mfa|cvv|cvc|iban|ssn|social security")
-_WEAK = r"secrets?|tokens?|log ?ins?|combinations?|(?:account|routing|card) (?:number|no\.?)|sort code|user ?names?"
-# (every repeat is bounded and no two of them can match the same characters: a long hostile note costs
-# milliseconds, not seconds; tested)
-_SECRET_WORDS = re.compile(
-    rf"(?i){_B}(?:{_STRONG}){_E}[^\n]{{0,24}}?(?:\b(?:is|are|was|were)\b|[:=])\s*\S"
-    rf"|{_B}(?:{_STRONG}){_E}[^\n0-9]{{0,40}}[0-9]"
-    rf"|{_B}(?:{_STRONG}){_E}[^\n]{{0,40}}?{_B}[A-Za-z0-9]{{4,8}}-[A-Za-z0-9]{{4,8}}{_E}"
-    rf"|{_B}(?:{_WEAK}){_E}[^\n]{{0,24}}?(?:\b(?:is|are|was|were)\b|[:=])[^\n0-9]{{0,60}}"
-    rf"(?:(?<![A-Za-z0-9])[0-9]{{4,}}|(?<=[A-Za-z])[0-9]|[0-9]{{1,3}}[A-Za-z])")
-_SECRET_ELSEWHERE = re.compile(  # the same thing said in other languages: any note that names it stays
-    r"(?i)passwort|kennwort|contrase[nñ]a|mot de passe|senha|wachtwoord|parola d'ordine|пароль|密码|密碼|パスワード|비밀번호")
-# a place that has a code (a door, the wifi, a card) and a short number on the same line
-_PLACE_AND_NUMBER = re.compile(
-    r"(?im)^(?=[^\n]*\b(?:codes?|door|gate|alarm|lock(?:er|box)?|safe|garage|wi-?fi|router|visa|mastercard|amex|card)\b)"
-    r"[^\n]*(?<![0-9A-Za-z.])[0-9]{3,8}[#*]?(?![0-9A-Za-z])")
-_BEARER = re.compile(
-    r"(?i)\b(?:bearer|basic)\s+(?=\S{0,200}[0-9=])[A-Za-z0-9._~+/=-]{8,}"
-    r"|(?<![a-z0-9+.-])[a-z][a-z0-9+.-]{0,20}://[^\s/:@]{1,80}:[^\s/@]{1,80}@"
-    r"|[?&](?:access_token|api_key|apikey|auth|key|password|secret|sig|signature|token)=[^\s&]{6,}"
-    r"|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
-_ENV_LINE = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Z0-9_]{0,60}(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?)\s*[:=]\s*\S")
-# a place one signs in to (the wifi, a portal, an account) and, on the same line, a word made of letters and digits
-_PLACE_AND_WORD = re.compile(
-    r"(?im)^(?=[^\n]{0,400}\b(?:wi-?fi|router|portal|sign[- ]?in|log[- ]?in|account|ssh)\b)[^\n]{0,400}?"
-    r"(?<![A-Za-z0-9])(?=[A-Za-z]{0,30}[0-9])(?=[0-9]{0,30}[A-Za-z])[A-Za-z0-9!@#$%^&*._-]{6,}")
-_DIGIT_RUN = re.compile(r"(?<![0-9])(?:[0-9][ .\-/]?){13,19}(?![0-9])")
-_IBAN = re.compile(r"\b[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]{4}){3,7}(?: ?[A-Z0-9]{1,4})?\b")
-_GROUPED = re.compile(r"(?<![A-Za-z0-9-])(?=[A-Za-z0-9-]*[0-9])[A-Za-z0-9]{4,6}(?:-[A-Za-z0-9]{4,6}){1,5}(?![A-Za-z0-9-])")
-_BLOB = re.compile(r"\b[A-Fa-f0-9]{24,}\b|(?<![A-Za-z0-9+_=-])(?=[A-Za-z0-9+_=-]{0,200}[0-9])(?=[A-Za-z0-9+_=-]{0,200}[a-z])"
-                   r"(?=[A-Za-z0-9+_=-]{0,200}[A-Z])[A-Za-z0-9+_=-]{20,}")
+# A note that trips secrets.has_secret, or reads like an order or one of the plugin's own notes, stays where it is
+# (whole: a masked note would come back and replace the real one).
 _OWN_MARKS = re.compile(
     r"(?i)<!--|\[\s*(?:end\s+)?grok[\s_-]*bot[\s_-]*twin|\[\s*sent\s+from\s+your\s+computer|"
     r"\[\s*description\s+of\s+this\s+twin|\[\s*blocked\s*:|[═━]{3,}|={6,}|^\s*§\s*$", re.M)
@@ -256,16 +217,6 @@ _UNSEEN = set("͏ᅟᅠ឴឵⠀ㅤﾠ") | {chr(c) for c in range(0xFE00, 0xFE10
 _WORD_RE = re.compile(r"[^\W\d_]{2,}")
 
 
-def _luhn(digits: str) -> bool:
-    total = 0
-    for i, ch in enumerate(reversed(digits)):
-        d = int(ch)
-        if i % 2:
-            d = d * 2 - 9 if d > 4 else d * 2
-        total += d
-    return total % 10 == 0
-
-
 def _odd_characters(entry: str) -> bool:
     """Control characters, characters that cannot be seen (Unicode's format, private and unassigned classes: zero
     width marks, direction marks, the "tag" block, soft hyphens), and words that mix Latin letters with Greek or
@@ -281,15 +232,6 @@ def _odd_characters(entry: str) -> bool:
         if any("a" <= c.lower() <= "z" for c in word) and any(0x370 <= ord(c) <= 0x52f for c in word):
             return True
     return False
-
-
-def _holds_secret(text: str) -> bool:
-    if (secrets.detect_secrets(text) or _SECRET_WORDS.search(text) or _SECRET_ELSEWHERE.search(text)
-            or _PLACE_AND_NUMBER.search(text) or _PLACE_AND_WORD.search(text) or _BEARER.search(text)
-            or _ENV_LINE.search(text) or _IBAN.search(text)
-            or _GROUPED.search(text) or _BLOB.search(text)):
-        return True
-    return any(_luhn(re.sub(r"[^0-9]", "", m.group(0))) for m in _DIGIT_RUN.finditer(text))  # a payment card number
 
 
 def why_held(entry: Any) -> Optional[str]:
@@ -308,12 +250,10 @@ def _why_held(entry: str) -> Optional[str]:
         return "long"
     if _odd_characters(entry):
         return "odd"
-    # read three times: as written; with look-alike forms folded to the plain ones (full-width letters,
-    # ligatures); and with accents and other marks taken off the letters ("pássword")
+    if secrets.has_secret(entry):  # (read as written, in plain NFKC form and without accents: "pássword")
+        return "secret"
     bare = "".join(c for c in unicodedata.normalize("NFKD", entry) if unicodedata.category(c) != "Mn")
     for text in dict.fromkeys((entry, unicodedata.normalize("NFKC", entry), bare)):
-        if _holds_secret(text):
-            return "secret"
         if _OWN_MARKS.search(text):
             return "mark"
         if _ORDERS.search(text):

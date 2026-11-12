@@ -2,7 +2,7 @@
  "about": "Shapes of the local API for requests between the owner's computers (routes /tasks*). Same rules as api_shapes.json; checked against the real backend in tests/test_tasks_units.py and tests/test_tasks_machines.py.",
  "shapes": {
   "Tasks": {
-   "route": "GET /tasks; also the answer of POST /tasks/switch, POST /tasks/mode, POST /tasks/{id}/approve and POST /tasks/{id}/answer",
+   "route": "GET /tasks; also the answer of POST /tasks/switch, POST /tasks/mode and POST /tasks/{id}/approve",
    "required": {
     "switch": "TasksSwitch",
     "linked": "bool",
@@ -12,8 +12,7 @@
     "log": "list[TaskLogRow]",
     "limits": "TasksLimits",
     "waiting": "list[TaskWaiting]",
-    "mode": "TasksMode",
-    "asking": "list[TaskAsking]"
+    "mode": "TasksMode"
    },
    "closed": true
   },
@@ -69,14 +68,13 @@
     "seconds": "int|null",
     "reply": "str",
     "label": "str",
-    "approval": "TaskApproval|null",
-    "answered": "TaskAnswered|null"
+    "approval": "TaskApproval|null"
    },
    "closed": true
   },
   "TaskResult": {
    "route": "POST /tasks/ask and POST /tasks/check",
-   "note": "label: 'done on Surface - 12 s', 'waiting for approval on Surface', 'not sent: requests are switched off on Surface', ... hint: only while waiting for approval; approval: only while a step waits there AND that computer lets this one answer it",
+   "note": "label: 'done on Surface - 12 s', 'waiting for approval on Surface', 'not sent: requests are switched off on Surface', ... hint: only while waiting for approval",
    "required": {
     "id": "str",
     "machine": "TaskResultMachine",
@@ -88,8 +86,7 @@
     "error": "ErrorBody|null"
    },
    "optional": {
-    "hint": "str",
-    "approval": "TaskResultApproval"
+    "hint": "str"
    },
    "closed": true
   },
@@ -124,12 +121,11 @@
    "closed": true
   },
   "TasksMode": {
-   "note": "what happens on THIS computer when a step of a request needs approval. value: here (default; the step waits for the owner on this computer) | linked (the computer that asked is shown the step and may answer it too) | safe (such a step is refused at once). Chosen on this computer only, with POST /tasks/mode {\"mode\"} or `hermes twin requests mode`; no other computer can set it. warning: the one sentence to show before `linked` is turned on",
+   "note": "what happens on THIS computer when a step of a request needs approval. value: here (default; the step waits for the owner on this computer) | safe (such a step is refused at once). Chosen on this computer only, with POST /tasks/mode {\"mode\"} or `hermes twin requests mode`; no other computer can set it. A \"linked\" stored by an older version reads as here",
    "required": {
     "value": "str",
     "label": "str",
-    "choices": "list[TasksModeChoice]",
-    "warning": "str"
+    "choices": "list[TasksModeChoice]"
    },
    "closed": true
   },
@@ -138,36 +134,6 @@
     "value": "str",
     "label": "str",
     "note": "str"
-   },
-   "closed": true
-  },
-  "TaskAsking": {
-   "note": "a step that waits on ANOTHER computer (peer) for a request asked from this one, which that computer lets this one answer (its mode is `linked`); answered with POST /tasks/{id}/answer {\"choice\": \"once\"|\"deny\", \"q\"}. command and description are the step as that computer shows it, password-like text hidden",
-   "required": {
-    "id": "str",
-    "peer": "str",
-    "twin": "str",
-    "text": "str",
-    "command": "str",
-    "description": "str",
-    "asked_at": "str|null",
-    "q": "str"
-   },
-   "closed": true
-  },
-  "TaskAnswered": {
-   "note": "a step of this request was answered from the computer that asked (mode `linked`): what was answered and the name of the computer it was answered on",
-   "required": {
-    "choice": "str",
-    "by": "str"
-   },
-   "closed": true
-  },
-  "TaskResultApproval": {
-   "note": "the step as the asked computer shows it, for the owner to read. Its mark is not in a result: the page (Tasks.asking), `hermes twin requests` and /twin approve show what answers it",
-   "required": {
-    "command": "str",
-    "description": "str"
    },
    "closed": true
   }

@@ -1,4 +1,4 @@
-"""Hermes' skill scanner and cron resume (for "Move routines to Hermes").
+"""Hermes cron jobs: resume, pause and create switched off (for "Move routines to Hermes").
 
 Everything here runs only on demand (never in register()). Subprocesses use argument lists, stdin closed,
 timeouts and capped output; untrusted bot names are passed as `--bot=NAME` so they can never become flags.
@@ -10,12 +10,11 @@ import os
 import re
 import stat
 import sys
-import time
 from pathlib import Path
 from typing import Any, Optional
 
 from . import osflags as _osflags
-from . import safe
+from . import h2g, routines_jobs, safe, store
 from .engine import (WHAT_HERMES, EngineError, check_path_safety, resolve_tool, run_capped,
                      tool_problem_text)
 from .model import valid_id
@@ -130,25 +129,13 @@ def _summary_lines(raw: bytes, limit: int = 12) -> list[str]:
     return [ln for ln in lines if ln][-limit:]
 
 
-def scan_skill_dir(path: Path) -> Optional[str]:
-    """Verdict from Hermes' skill scanner ('safe'|'caution'|'dangerous'), or None when unavailable."""
-    try:
-        from tools.skills_guard import scan_skill  # lazy: optional, private-but-documented scanner
-    except Exception:
-        return None
-    try:
-        verdict = getattr(scan_skill(Path(path), source="community"), "verdict", None)
-        return verdict if verdict in ("safe", "caution", "dangerous") else None
-    except Exception:
-        return None
-
-
 def _cron_action(action: str, job_id: str, profile: str, ctx: Any = None) -> tuple[bool, str]:
     """Resume or pause one Hermes cron job (`action` is "resume" or "pause").
 
     When Hermes offers its tool-approval pipeline (ctx.dispatch_tool), that is the only path: a rejection or
     failure there stops here and is reported, never retried another way. The `hermes [-p P] cron <action> ID`
-    CLI is used only when that pipeline is genuinely unavailable (no ctx, or a ctx without dispatch_tool)."""
+    CLI is used only when that pipeline is genuinely unavailable (no ctx, or a ctx without dispatch_tool).
+    Never call it under store.locked(): it waits on another program (see the lock order in store.py)."""
     if action not in ("resume", "pause"):
         return False, "unknown action"
     if not _plain_id(job_id):
@@ -186,7 +173,15 @@ def _cron_action(action: str, job_id: str, profile: str, ctx: Any = None) -> tup
 
 
 def resume_cron(job_id: str, profile: str, ctx: Any = None) -> tuple[bool, str]:
-    """Resume one paused Hermes cron job (see _cron_action)."""
+    """Resume one paused Hermes cron job (see _cron_action); never one whose routine Hermes to Grok runs in Grok, or
+    is moving (a routine runs in one place). Hermes to Grok's own handover step calls _cron_action itself."""
+    try:
+        jobs = _load_jobs(store.profile_home(profile)) if _plain_id(job_id) else []
+    except ValueError:  # not a plain profile name: _cron_action refuses it
+        jobs = []
+    why = h2g.runs_in_grok(profile, next((j.get("name") for j in jobs if _job_id(j) == job_id), None))
+    if why:
+        return False, why
     return _cron_action("resume", job_id, profile, ctx)
 
 
@@ -387,7 +382,8 @@ def _read_jobs_file(path: Path) -> Optional[bytes]:
 
 
 def _load_jobs(profile_home: Optional[Path]) -> list[dict]:
-    """<profile>/cron/jobs.json (Hermes' cron store: {"jobs": [...]}), read only; [] when absent or unsafe."""
+    """<profile>/cron/jobs.json (Hermes' cron store, as routines_jobs.parse knows it), read only; [] when absent,
+    unsafe or in a shape not known here."""
     if profile_home is None:
         return []
     path = Path(profile_home) / "cron" / "jobs.json"
@@ -395,11 +391,9 @@ def _load_jobs(profile_home: Optional[Path]) -> list[dict]:
     if raw is None:
         return []
     try:
-        data = json.loads(raw.decode("utf-8"))
+        return routines_jobs.parse(json.loads(raw.decode("utf-8")))[1]
     except (ValueError, RecursionError):
         return []
-    jobs = data.get("jobs") if isinstance(data, dict) else data
-    return [j for j in jobs if isinstance(j, dict)][:1000] if isinstance(jobs, list) else []
 
 
 def _job_id(j: dict) -> str:

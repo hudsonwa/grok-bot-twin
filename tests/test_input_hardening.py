@@ -238,4 +238,7 @@ def test_slash_messaging_is_read_only(monkeypatch):
     assert "only shows status" in out and calls == []
     assert slash.handle("demo remove", platform="discord").startswith("From a messaging chat")
     assert slash.handle("sync", platform="local") == "synced"
-    assert slash.handle("sync") == "synced"
+    # a caller that names no platform, or an unknown one, is not taken for this computer (it fails closed)
+    calls.clear()
+    for platform in (None, "", "something-new"):
+        assert slash.handle("sync", platform=platform).startswith("From a messaging chat") and calls == []

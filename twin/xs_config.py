@@ -34,7 +34,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import fleet, fleet_io as fio, fleet_profiles as fp
+from . import config, fleet, fleet_io as fio, fleet_profiles as fp
 from . import hermes_side as hs
 from . import secrets as _secrets
 from . import store
@@ -160,18 +160,6 @@ def _model_word(v: Any) -> Optional[str]:
     return v if v and _MODEL_RE.match(v) else None
 
 
-# Instructions are free text, so no list of names can vouch for them. Besides the plugin's password-and-key check
-# a LINE is not sent at all when it holds an address with a name and password in it, an Authorization or Bearer
-# value, or a short "password: ..." of the kinds below. (A check, not a proof: the docs say not to keep
-# passwords in instructions.)
-_PERSONA_LINE = (
-    re.compile(r"://[^/\s:@]+:[^/\s@]+@"),
-    re.compile(r"(?i)\bauthorization\s*[:=]"),
-    re.compile(r"(?i)\bbearer\s+\S{8,}"),
-    re.compile(r"(?i)\b(?:api[_-]?key|token|secret|password|passwd|pwd|passphrase)\s*[:=]\s*\S{4,}"),
-)
-
-
 def clean_persona(text: Any) -> str:
     """Instructions as they may travel and be written: the plugin's privacy filter (control characters dropped,
     password-like text masked), lines that look like a sign-in left out, capped, and nothing in it can open or
@@ -180,7 +168,8 @@ def clean_persona(text: Any) -> str:
         return ""
     lines = []
     for line in hs.shown(text, PERSONA_CAP).split("\n"):
-        hidden = any(rx.search(line) for rx in _PERSONA_LINE) or (len(line) <= 4000 and _secrets.has_secret(line))
+        # the plugin's one password-and-key check, strict by line: a line too long to check, or with anything masked, is held
+        hidden = len(line) > 4000 or hs.HIDDEN_LINE in line or _secrets.has_secret(line)
         lines.append(hs.HIDDEN_LINE if hidden else line)
     return fp._inert("\n".join(lines))
 
@@ -605,17 +594,6 @@ def _ask(ln: dict, machine_id: str, body: dict) -> tuple:
     return follow._counted_request(ln, machine_id, ROUTE, {"proto": fleet.PROTO, **body}, timeout=12.0)
 
 
-def _known_toolsets() -> Optional[set]:
-    """The tool sets this Hermes knows, or None when that cannot be told from here (the plugin's stand-alone tools
-    run without Hermes)."""
-    try:
-        import toolsets as _ts  # Hermes' own module
-        names = set(_ts.get_toolset_names())
-        return names or None
-    except Exception:
-        return None
-
-
 def needs_of(cfg: dict, doc: dict, took: dict, own_setup: Any = False) -> list:
     """What these settings ask for that this computer lacks: connectors that are not set up for this twin here,
     tool sets this Hermes does not know, and a provider this computer does not use."""
@@ -629,7 +607,7 @@ def needs_of(cfg: dict, doc: dict, took: dict, own_setup: Any = False) -> list:
                 out.append({"kind": "connector", "name": name,
                             "message": f"The connector {name} is not set up on this computer. Add it to this twin "
                                        "in Hermes here; its sign-in is never copied."})
-        known = _known_toolsets()
+        known = config.known_toolsets()  # (None without Hermes: the plugin's stand-alone tools)
         if known is not None:
             wanted: list = list(tools.get("toolsets", []))
             for names in (tools.get("platform_toolsets") or {}).values():

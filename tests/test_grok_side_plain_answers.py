@@ -227,7 +227,7 @@ def test_hermes_twin_status_says_what_the_page_says(twin, home):
     assert out.splitlines()[0] == "Grok Bot Twin: 1 twin, 1 with a change to send to Grok, 1 to finish setting up."
     assert " Acme Support: 1 change to send to Grok · 2 things left · checked " in out, out  # the same sentence
     assert "Updating (" not in out
-    assert "- Acme Support: 1 change to send to Grok · 2 things left, checked " in slash.handle("status")
+    assert "- Acme Support: 1 change to send to Grok · 2 things left, checked " in slash.handle("status", platform="cli")
 
 
 # ---- Stop twinning without botport ---------------------------------------------------------------------------------

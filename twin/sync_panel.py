@@ -12,7 +12,6 @@ The choices are kept in <plugin-data>/sync-panel.json:
 """
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -105,7 +104,6 @@ class Provider:
     live: bool = False  # `default` reads the part's own switches: the row always shows them, whatever was saved here
 
 
-_lock = threading.RLock()
 _providers: dict[str, Provider] = {}
 _mirror_probe: Optional[Callable[[str], str]] = None
 
@@ -119,8 +117,7 @@ def provide(key: str, directions: Callable[[Ctx], dict], last_synced: Optional[C
     shows what they say, never an older choice saved here."""
     if key not in KEYS:
         raise ValueError(f"unknown item {key!r}")
-    with _lock:
-        _providers[key] = Provider(directions, last_synced, on_change, note, default, sentence, live)
+    _providers[key] = Provider(directions, last_synced, on_change, note, default, sentence, live)
 
 
 def set_mirror_probe(fn: Optional[Callable[[str], str]]) -> None:
@@ -178,8 +175,7 @@ def _defaults() -> dict:
 
 
 def _provider(key: str) -> Provider:
-    with _lock:
-        return _providers.get(key) or _defaults()[key]
+    return _providers.get(key) or _defaults()[key]
 
 
 # ---- the file ---------------------------------------------------------------------------------------------------
@@ -194,6 +190,11 @@ def _read() -> dict:
     twins = raw.get("twins") if isinstance(raw.get("twins"), dict) else {}
     synced = raw.get("synced") if isinstance(raw.get("synced"), dict) else {}
     return {"v": 1, "twins": twins, "synced": synced}
+
+
+def edit():
+    """`with sync_panel.edit() as f:` change the panel's file under the plugin's one lock (store.locked)."""
+    return store.update(_read, lambda f: store.atomic_write_json(_path(), f))
 
 
 def _entry(table: dict, pid: str, key: str) -> dict:
@@ -214,10 +215,8 @@ def mark_synced(pair_id: str, key: str, direction: str, at: Optional[str] = None
     """A part of the plugin moved something for this item just now (or at `at`)."""
     if key not in KEYS or direction not in ("grok_to_hermes", "hermes_to_grok") or not valid_id(pair_id):
         raise ValueError("mark_synced: bad item or direction")
-    with _lock, store.locked():
-        f = _read()
+    with edit() as f:
         f["synced"].setdefault(pair_id, {})[key] = {"at": at if parse_iso(at) else now_iso(), "direction": direction}
-        store.atomic_write_json(_path(), f)
 
 
 # ---- the twins on this computer ---------------------------------------------------------------------------------
@@ -371,35 +370,31 @@ def choose(svc: Any, pair_id: Any, key: Any, direction: Any) -> dict:
     ctx = next((c for c in _contexts(svc) if c.pair_id == pair_id), None)
     if ctx is None:
         raise EngineError("no_twin", "That twin is not on this computer.")
-    with _lock:
-        f0 = _read()
-        before = _row(key, ctx, f0)
-        saved = _entry(f0["twins"], pair_id, key).get("direction")
-        # (a live part: the row already shows its real switches, so "nothing changed" is true whatever was saved)
-        if before["direction"] == direction and (saved in (None, direction) or _provider(key).live):
-            said = f"Nothing changed: {LABELS[key]} for {ctx.name} was already set to {ARROWS[direction]}."
-        else:
-            dirs = _directions(_provider(key), ctx)
-            if dirs[direction] != "ok":
-                raise EngineError("not_available", WHY[dirs[direction]])
-            prov = _provider(key)
-            if prov.on_change:
-                prov.on_change(ctx, direction)  # may refuse with an EngineError: then nothing is saved
-            with store.locked():
-                f = _read()
-                f["twins"].setdefault(pair_id, {})[key] = {"direction": direction, "at": now_iso()}
-                store.atomic_write_json(_path(), f)
-            said = f"{LABELS[key]} for {ctx.name}: {ARROWS[direction]}. {_said(prov, key, ctx, direction)}"
+    f0 = _read()
+    before = _row(key, ctx, f0)
+    saved = _entry(f0["twins"], pair_id, key).get("direction")
+    # (a live part: the row already shows its real switches, so "nothing changed" is true whatever was saved)
+    if before["direction"] == direction and (saved in (None, direction) or _provider(key).live):
+        said = f"Nothing changed: {LABELS[key]} for {ctx.name} was already set to {ARROWS[direction]}."
+    else:
+        dirs = _directions(_provider(key), ctx)
+        if dirs[direction] != "ok":
+            raise EngineError("not_available", WHY[dirs[direction]])
+        prov = _provider(key)
+        if prov.on_change:  # (no lock held: a part takes its own, and the plugin's lock is always the inner one)
+            prov.on_change(ctx, direction)  # may refuse with an EngineError: then nothing is saved
+        with edit() as f:
+            f["twins"].setdefault(pair_id, {})[key] = {"direction": direction, "at": now_iso()}
+        said = f"{LABELS[key]} for {ctx.name}: {ARROWS[direction]}. {_said(prov, key, ctx, direction)}"
     return {**view(svc), "said": {"sentence": said}}
 
 
 def forget_twin(pair_id: str) -> None:
     """A twin went: its choices go with it."""
-    with _lock, store.locked():
-        f = _read()
-        gone = [f["twins"].pop(pair_id, None), f["synced"].pop(pair_id, None)]
-        if any(g is not None for g in gone):
-            store.atomic_write_json(_path(), f)
+    if any(pair_id in t for t in _read().values() if isinstance(t, dict)):
+        with edit() as f:
+            f["twins"].pop(pair_id, None)
+            f["synced"].pop(pair_id, None)
 
 
 # ---- the terminal -----------------------------------------------------------------------------------------------
@@ -445,6 +440,5 @@ def lines(twin: dict, ago: Callable[[Optional[str]], str]) -> list[str]:
 
 def _reset_for_tests() -> None:
     global _mirror_probe
-    with _lock:
-        _providers.clear()
+    _providers.clear()
     _mirror_probe = None

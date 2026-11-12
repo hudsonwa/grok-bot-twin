@@ -47,13 +47,6 @@ a model." Each twin has a box, all ticked. Two ways on:
   sheet offers it as the way to keep their skills the same.
 - **One at a time.** The twin's own sheet: paste its instructions, choose its model.
 
-Optional, and visible on the same sheet: **Let Hermes do the Grok part**. Hermes' own computer-use tool can
-open each ticked bot's chat in the Grok app, paste the request and save the answer to Downloads. The sheet
-first checks that computer use is there (if not, it says exactly what to switch on), then shows what Hermes
-will do, that every click asks you first, and that pictures of the Grok window go to the chat's model
-provider. Nothing starts until you tick "I will approve each step myself" and press **Start in a new Hermes
-chat**. This path has not been run against the real Grok app; see [docs/SETUP-ORIGINS.md](docs/SETUP-ORIGINS.md).
-
 The same in the terminal: `hermes twin finish --all --model MODEL` sets the model and prints the request;
 `hermes twin import-exports ~/Downloads` imports every answer file it finds there, after one question.
 
@@ -713,10 +706,14 @@ read the key too. Details: docs/DISCLOSURE.md.
 
 ## Ask a twin on another computer
 
-Once your computers are linked, a twin can ask its copy on another one to do something there. In a chat with
-a twin, say it the way you would to a person:
+Once your computers are linked, you can ask a twin's copy on another one to do something there. In a Hermes
+chat on this computer, type:
 
-> on Surface: how much disk space is free?
+```
+/twin ask Surface: how much disk space is free?
+```
+
+Only you ask: the model in a chat has no tool for it, and a command that a chat starts cannot ask either.
 
 The copy of that twin on Surface gets this as an ordinary chat message, answers with what it finds there, and
 the answer comes back into your chat under a line that says where it was done and how long it took, like this:
@@ -745,35 +742,24 @@ What a request can and cannot do:
 - A step that needs your approval waits for you **on the computer where it would run**. Your chat says
   `waiting for approval on Surface`. On Surface the Twins page shows the request and the step first, with two
   answers, **Do it once** and **Don't** (terminal: `hermes twin requests`). No other computer can answer
-  for it, unless you chose that on Surface itself (see the three choices below). If nobody answers within
+  for it. If nobody answers within
   5 minutes the step is not done, and the answer says
   `done on Surface - 5 min; a step was not approved there`.
 - Only your linked computers can ask, over the link that carries the twin list. Requests pass through the Mac
   with the Grok app, so it has to be on.
 - What travels is the text you typed (2,000 characters at most) and the twin's answer. Anything that looks
-  like a password or key is masked on the way out and on the way back. On a computer where you chose "Let my
-  own linked computers approve" (below), the step that waits there and your answer to it travel as well.
+  like a password or key is masked on the way out and on the way back.
 - Every request is in the log on both computers (Twins page, or `hermes twin requests`): who asked, what, and
   how it ended.
 
-**When a step needs approval: three choices, made on the computer that runs the request.** They are under
+**When a step needs approval: two choices, made on the computer that runs the request.** They are under
 the switch on that computer's Twins page (terminal: `hermes twin requests mode`). No other computer and no
 request can change the choice.
 
 | Choice | What happens to a step that needs approval |
 |---|---|
 | **Ask on this computer** (the default) | It waits until you answer on that computer. Nothing about the step leaves it. |
-| **Let my own linked computers approve** | The computer that asked shows you the step, word for word as the asked computer shows it, and you can answer from there: on its Twins page, by typing `/twin approve` in the chat (it shows the step again and the line that answers it), or in a terminal. You can still answer on the asked computer; the first answer counts. |
 | **Only safe requests** | It is refused at once and the answer says why. Requests that only read still work. |
-
-Choose "Let my own linked computers approve" only if you would let whoever sits at any of your linked
-computers decide for this one: a step can then go ahead with nobody at this computer. Such an answer is signed
-like every request, comes only from the computer that asked, counts only for the one step it names and only
-while that step waits, and both computers' logs say so. The plugin gives the model in your chat no way to
-answer and does not tell it what answers the step: you type the line or press the button yourself. One limit,
-said plainly: a chat that your Hermes lets run any command without asking can do on that computer what you
-can do there, answering included, so with this choice you also trust the chats on your linked computers that
-far. The warning you see when you turn it on says the same.
 
 In our tests an answer took 1 to 8 s from a Mac or a Linux computer and 12 to 27 s from Windows, with a script
 standing in for the model. With a real model an answer took 12 to 34 s, and 53 s for the first one after Hermes
@@ -782,7 +768,7 @@ had been restarted on the asked computer.
 | Your chat says | Do this |
 |---|---|
 | `not sent: requests are switched off on Surface` | On Surface, open **Twins** and switch it on. |
-| `waiting for approval on Surface` | Answer on Surface: its Twins page shows the step and the two answers. If your chat shows the step as well, Surface lets you answer from here: type `/twin approve`. |
+| `waiting for approval on Surface` | Answer on Surface: its Twins page shows the step and the two answers. |
 | `done on Surface - 3 s; a step was refused: Surface takes only safe requests` | Surface is set to "Only safe requests". Change it on Surface if you want such steps to wait for you. |
 | `not done: Surface could not be reached` | Check that Surface and the Mac with the Grok app are on, with Hermes open on both. |
 | `not done on Studio` and "The twin on Studio could not answer." | Open that twin's chat on Studio to see why; in our test it had no working model. |
@@ -790,7 +776,7 @@ had been restarted on the asked computer.
 | "Too many requests to Surface in a short time." | Try again in a minute. The limits are 6 a minute and 40 an hour. |
 
 In the terminal: `hermes twin ask Surface "how much disk space is free?"` (add `--twin "Acme Support"` when you
-have several twins), and in any Hermes chat `/twin ask Surface: how much disk space is free?`.
+have several twins), from a terminal of your own (not one a chat started).
 
 ## Uninstall
 
@@ -968,7 +954,7 @@ hermes twin
   `fleet name NAME`, `fleet once`, `fleet run`, `fleet settings`, `fleet skills`, `fleet memory`), `routines`
   (`on|off`, `move ROUTINE COMPUTER`, `run-here on|off`, `restore`), `background on|off`; each takes `--json`.
 - **Ask another computer**: `ask COMPUTER "TEXT"`, `requests` (the log), `requests on|off`,
-  `requests approve|deny ID`, `requests mode [here|linked|safe]`.
+  `requests approve|deny ID`, `requests mode [here|safe]`.
 - **Fix things**: `conflicts`, `resolve`, `versions`, `restore`, `doctor`, `setup`.
 - **Advanced**: `check`, `list-grok`, `recent`, `compare`, `copies`, `checklist`, `syncs`, `import`, `switch`, `approve`,
   `skip`, `send-to-grok`, `skill-sync`, `digest`, `verify`, `demo`, `uninstall`.
@@ -995,12 +981,14 @@ request to paste into each bot's chat in Grok. `hermes twin import-exports DIR` 
 file in DIR to its twin by the bot's name (or id) and imports them all after one question (`--yes` skips it,
 `--show` prints the text first, `--twin NAME` limits it); it refuses in a request's chat turn too.
 
-Slash command: `/twin [status | check [TWIN] | conflicts [TWIN] | recent [TWIN] | ask COMPUTER: TEXT | requests | approve | deny | demo ...]`.
+Slash command: `/twin [status | check [TWIN] | conflicts [TWIN] | recent [TWIN] | ask COMPUTER: TEXT | requests | demo ...]`.
+Anything but status and recent works only in a chat that Hermes names as one of its own local surfaces (its
+terminal, terminal UI or Desktop); a messaging app, or a caller that names no surface, gets status only.
 Agent tools: `twin_status` (plain language: state, last check, what to do yourself in Grok and in Hermes,
 changes waiting, items changed in both places, skill sync, and the two things never copied from Grok),
 `twin_recent`. Both say "your Grok twin" and an
-internal id unless "Let the model see names" is on, and both say so when the twin is the sample. A third tool,
-`twin_ask_machine`, is what a twin uses for "on Surface: …" (see "Ask a twin on another computer").
+internal id unless "Let the model see names" is on, and both say so when the twin is the sample. No tool asks
+another computer: only you do (see "Ask a twin on another computer").
 
 ## How fast is it?
 
@@ -1078,8 +1066,6 @@ Full details: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
   all ticked now**, at most 15 minutes), the names, dates and sizes of the files there, and the text of each new
   `.json`, `.txt` or `.md` file up to 2 MB that is a `grok-bot-export` document; taken from it is what **Import
   setup export** takes (below). Only a digest of each imported file's name, size and date is kept.
-- **Let Hermes do the Grok part** (optional): one more hook, `pre_tool_call`, which does nothing unless you
-  started that path, and then only guards Hermes' `computer_use` tool for 30 minutes (see docs/DISCLOSURE.md).
 - **A setup export you hand over**: the file a bot wrote about itself, which you drop on the Twins page or name
   to `hermes twin import`. The plugin reads from it the bot's name, its instructions, its routines (name,
   schedule, time zone, prompt) and the names of its connectors. The lists of memories and of facts about you
@@ -1132,7 +1118,7 @@ Full details: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
   shell script for the sync bot's box in Grok. The plugin never runs it on this computer. In the box it runs
   botport on files the sync bot copied there, makes no network calls, and installs a skill only through
   botport, which checks it against the twin's pass first.
-- **Background threads**: two, started on the first chat or Twins page visit (plus the ones for sharing and
+- **Background threads**: up to two, started on the first chat or Twins page visit once you have a twin (none before; plus the ones for sharing and
   for requests, below, while you use those). One checks file metadata
   every `sync_interval_seconds` (default 60) and updates a twin when its Grok side changed. The other only
   waits: it sleeps until the Grok app saves its bot list, then wakes the first one so a new name or

@@ -55,19 +55,19 @@ def test_cli_remove_and_digest(svc):
 
 
 def test_slash(svc):
-    assert "No twins yet" in slash.handle("")
-    assert "Sample twin ready" in slash.handle("demo")
-    assert "Acme Support [sample]" in slash.handle("status")
-    assert "up to date" in slash.handle("check") or "updated" in slash.handle("check")
-    assert slash.handle("sync") == slash.handle("check")  # the older name still works
+    assert "No twins yet" in slash.handle("", platform="cli")
+    assert "Sample twin ready" in slash.handle("demo", platform="cli")
+    assert "Acme Support [sample]" in slash.handle("status", platform="cli")
+    assert "up to date" in slash.handle("check", platform="cli") or "updated" in slash.handle("check", platform="cli")
+    assert slash.handle("sync", platform="cli") == slash.handle("check", platform="cli")  # the older name still works
     assert "/twin check [TWIN]" in slash.HELP and "/twin sync" not in slash.HELP
-    assert slash.handle("conflicts ../x") == 'Grok Bot Twin: No twin is called "../x". Your twins: "Acme Support"'
+    assert slash.handle("conflicts ../x", platform="cli") == 'Grok Bot Twin: No twin is called "../x". Your twins: "Acme Support"'
     # the twin is named as the page names it, quoted or not, in any case
     for given in ('"Acme Support"', "Acme Support", "acme support", "acme-support"):
-        assert slash.handle(f"conflicts {given}") == "Nothing changed in both places.", given
-        assert slash.handle(f"check {given}").startswith("- Acme Support: "), given
-    assert slash.handle("unknown") == slash.HELP
-    assert slash.handle('"unbalanced') == slash.HELP
+        assert slash.handle(f"conflicts {given}", platform="cli") == "Nothing changed in both places.", given
+        assert slash.handle(f"check {given}", platform="cli").startswith("- Acme Support: "), given
+    assert slash.handle("unknown", platform="cli") == slash.HELP
+    assert slash.handle('"unbalanced', platform="cli") == slash.HELP
 
 
 def test_cli_defaults_to_the_only_twin_and_plurals(svc):
@@ -115,7 +115,7 @@ def test_cli_defaults_to_the_only_twin_and_plurals(svc):
     assert run(["conflicts", "recipe planner"])[0] == 0
     rc, out, _ = run(["versions", "Acme Support"])
     assert rc == 0 and out.splitlines()[-1] == 'Put one back: hermes twin restore "Acme Support" NUMBER'
-    assert "say which one: /twin conflicts TWIN (\"Acme Support\", \"Recipe Planner\")" in slash.handle("conflicts")
+    assert "say which one: /twin conflicts TWIN (\"Acme Support\", \"Recipe Planner\")" in slash.handle("conflicts", platform="cli")
 
 
 def test_cli_demo_messages_doctor_status_line(svc):
@@ -131,7 +131,7 @@ def test_cli_demo_messages_doctor_status_line(svc):
     rc, out, _ = run(["doctor"])
     assert "Background check starts with the first chat or Twins page visit" in out
     assert "not running yet" not in out
-    assert "/twin check" in slash.handle("demo grok-edit") and "sync" not in slash.handle("demo grok-edit")
+    assert "/twin check" in slash.handle("demo grok-edit", platform="cli") and "sync" not in slash.handle("demo grok-edit", platform="cli")
 
 
 def test_cli_restore_with_nothing_kept(svc):

@@ -118,15 +118,12 @@ def test_routine_handover_pauses_hermes_first(real, monkeypatch):
     jobs = prof / "cron" / "jobs.json"
     calls = []
 
-    def act(on: bool):
-        def fn(job_id, profile, ctx=None):
-            calls.append(("resume" if on else "pause", job_id, profile))
-            jobs.write_text(json.dumps({"jobs": [_job(on)]}))
-            return True, ""
-        return fn
+    def act(action, job_id, profile, ctx=None):
+        calls.append((action, job_id, profile))
+        jobs.write_text(json.dumps({"jobs": [_job(action == "resume")]}))
+        return True, ""
 
-    monkeypatch.setattr(importer, "pause_cron", act(False))
-    monkeypatch.setattr(importer, "resume_cron", act(True))
+    monkeypatch.setattr(importer, "_cron_action", act)
     jobs.write_text(json.dumps({"jobs": [_job(True)]}))  # it runs in Hermes now
     svc.to_grok_allow(PID, ["routines"])
     r = svc.to_grok_runner(PID, "Morning digest", "grok")
@@ -141,7 +138,7 @@ def test_routine_handover_refused_when_hermes_does_not_pause(real, monkeypatch):
     svc, prof, w = real
     svc.h2g_test_writer = w
     (prof / "cron" / "jobs.json").write_text(json.dumps({"jobs": [_job(True)]}))
-    monkeypatch.setattr(importer, "pause_cron", lambda *a, **k: (True, ""))  # says yes, but the job stays on
+    monkeypatch.setattr(importer, "_cron_action", lambda *a, **k: (True, ""))  # says yes, but the job stays on
     svc.to_grok_allow(PID, ["routines"])
     with pytest.raises(EngineError) as e:
         svc.to_grok_runner(PID, "morning-digest", "grok")
