@@ -28,15 +28,11 @@ log = logging.getLogger(__name__)
 FAKE_PATH = h2g.FAKE_FILE
 SAMPLE_PROMPT = "Sample routine: {name}. Say one friendly line."
 
-# Hermes -> Grok is a beta, off by default for the whole plugin; only the owner's own terminal turns it on
-BETA_FILE = "h2g-beta.json"
-BETA_GATED = ("allow", "apply", "undo", "resolve", "move_runner", "preview")
-BETA_LABEL = "Beta (off)"
-BETA_OFF = "Hermes to Grok is a beta and is off."
-BETA_HOW = "Turn it on with: hermes twin to-grok beta on (in your own terminal)."
-BETA_ON = ("Hermes to Grok (beta) is on. Nothing is sent until you allow a twin, look at the preview and apply it. "
-           "Turn it off with: hermes twin to-grok beta off")
-BETA_OFF_NOW = "Hermes to Grok (beta) is off: nothing is sent to Grok. Turn it on again with: hermes twin to-grok beta on"
+# Hermes -> Grok is off for every twin until the owner allows that twin (per twin, per item); there is no switch for
+# the whole plugin any more. `hermes twin to-grok beta ...` is still understood, to say so.
+NO_BETA = ("Hermes to Grok is no longer a beta: it is off for every twin until you allow it "
+           "(hermes twin to-grok TWIN allow).")
+GRANT_WHERE = h2g.GRANT_WHERE
 
 
 def owner_only(own_page: bool = False) -> None:
@@ -63,7 +59,7 @@ class NoMirrorWriter:
         return {"state": "failed", "done": [], "failed": list(range(len(ops))), "at": None,
                 "message": "The Mirror is not set up, so Grok was not changed."}
 
-    def poll(self, change_id: str) -> Optional[dict]:
+    def poll(self, change_id: str, n: Optional[int] = None) -> Optional[dict]:
         return None
 
     def permission(self, bot: str) -> str:
@@ -241,28 +237,11 @@ class H2GMixin:
                        wanted=wanted, pause_hermes=lambda p, k: self._h2g_switch(p, k, False),
                        resume_hermes=lambda p, k: self._h2g_switch(p, k, True), mark_synced=mark)
 
-    # ---- the beta switch: Hermes -> Grok is off for the whole plugin until the owner turns it on ---------------------
-    def to_grok_beta_on(self) -> bool:
-        """True only when the owner turned the beta on in their own terminal (hermes twin to-grok beta on)."""
-        d = store.read_json(self.central / BETA_FILE, None)
-        return isinstance(d, dict) and d.get("on") is True
-
     def _h2g_owner_only(self, own_page: bool = False) -> None:
         owner_only(own_page)
 
-    def to_grok_set_beta(self, on: Any) -> dict:
-        """Turn the Hermes to Grok beta on or off for the whole plugin. Only from the owner's own terminal: never a
-        request from another computer, a command a chat started, or a REST call (there is no route for it)."""
-        if not isinstance(on, bool):
-            raise EngineError("usage", "Say on or off: hermes twin to-grok beta on")
-        self._h2g_owner_only(False)
-        store.atomic_write_json(self.central / BETA_FILE, {"on": on, "at": now_iso()})
-        return {"beta": on, "sentence": BETA_ON if on else BETA_OFF_NOW}
-
     def _h2g_call(self, pid: Any, fn: str, *args: Any) -> Any:
         pid = self.require_pair(pid)
-        if fn in BETA_GATED and not self._h2g_is_sample(pid) and not self.to_grok_beta_on():
-            raise EngineError("beta_off", BETA_OFF, BETA_HOW)
         try:
             return getattr(self._h2g(pid), fn)(pid, *args)
         except h2g.H2GError as exc:
@@ -272,18 +251,12 @@ class H2GMixin:
     def to_grok_info(self, pid: Any) -> dict:
         """The twin's allowlist, record of changes, and (when allowed) the preview of what would be sent now."""
         info = self._h2g_call(pid, "info")
-        info["beta"] = self.to_grok_beta_on() or self._h2g_is_sample(info["pair_id"])
-        if not info["beta"]:
-            info["beta_note"] = BETA_LABEL + ". " + BETA_OFF + " " + BETA_HOW
-            return info
         w = self._h2g_writer(info["pair_id"])
         bot = self._h2g_bot(info["pair_id"])
         info["permission"] = w.permission(bot or "-")
         if getattr(w, "kind", "") == "mirror":  # what the owner does once in Grok: the rule, and the Mirror's steps
-            info["in_grok"] = {"allow_rule": h2g_mirror.allow_rule(
-                config.settings().get("mirror_name") or "", [{"id": bot, "name": self._h2g_grok_name(bot)}]),
-                               "where": "Grok: Settings > Permissions > Auto-Review > Allow without Asking > Add rule",
-                               "mirror_steps": h2g_mirror.mirror_instructions()}
+            info["in_grok"] = {"allow_rule": (info.get("grant") or {}).get("rule") or self._h2g_rule(bot),
+                               "where": GRANT_WHERE, "mirror_steps": h2g_mirror.mirror_instructions()}
         if info["allowed"]:
             try:
                 info["preview"] = self.to_grok_preview(info["pair_id"])
@@ -291,13 +264,49 @@ class H2GMixin:
                 info["preview"] = {"error": exc.as_dict()}
         return info
 
+    def _h2g_rule(self, bot: str) -> str:
+        """The narrowest Auto-Review rule for this bot: the Mirror (setting mirror_name, only when it is a plain
+        name) may ask this one bot, named by its id, to edit its own fields and existing routines."""
+        return h2g_mirror.allow_rule(config.settings().get("mirror_name") or "",
+                                     [{"id": bot, "name": self._h2g_grok_name(bot)}])
+
     def to_grok_allow(self, pid: Any, items: Any = "all", own_page: bool = False) -> dict:
         self._h2g_owner_only(own_page)
-        out = self._h2g_call(pid, "allow", items)
-        return self._h2g_call(out["pair_id"], "info")
+        pid = self.require_pair(pid)
+        bot = self._h2g_bot(pid)
+        out = self._h2g_call(pid, "allow", items, self._h2g_rule(bot) if bot else None)
+        self._h2g_panel_follow(pid, out.get("allowed") or [], [])
+        return self.to_grok_info(pid)
+
+    def _h2g_panel_follow(self, pid: str, allowed: list, stopped: list) -> None:
+        """Allowing an item here IS the owner's choice of direction: the What syncs row follows it (Both ways for
+        name, description and instructions, which keep coming from Grok too; Hermes -> Grok for routines). Stopping
+        puts the row back to Grok -> Hermes (routines: Off). Without the panel module, the allowlist alone decides."""
+        try:
+            from . import sync_panel
+        except ImportError:
+            return
+        way_on = {"routines": "hermes_to_grok"}
+        way_off = {"routines": "off"}
+        with sync_panel._lock, store.locked():
+            f = sync_panel._read()
+            t = f["twins"].setdefault(pid, {})
+            for item, ways in ((i, (way_on, "both")) for i in allowed):
+                t[item] = {"direction": ways[0].get(item, ways[1]), "at": now_iso()}
+            for item in stopped:
+                if (t.get(item) or {}).get("direction") in ("both", "hermes_to_grok"):
+                    t[item] = {"direction": way_off.get(item, "grok_to_hermes"), "at": now_iso()}
+            store.atomic_write_json(sync_panel._path(), f)
 
     def to_grok_disallow(self, pid: Any, items: Any = "all") -> dict:
-        return self._h2g_call(pid, "disallow", items)
+        """Stopping is always allowed (also from a chat): it only ever takes changes back."""
+        before = self._h2g_call(pid, "info")["allowed"]
+        out = self._h2g_call(pid, "disallow", items)
+        self._h2g_panel_follow(out["pair_id"], [], [i for i in before if i not in (out.get("allowed") or [])])
+        info = self.to_grok_info(out["pair_id"])
+        if out.get("revoke"):
+            info["revoke"] = out["revoke"]
+        return info
 
     def to_grok_preview(self, pid: Any) -> dict:
         return self._h2g_call(pid, "preview")
@@ -339,7 +348,7 @@ class H2GMixin:
     def to_grok_tick(self) -> None:
         """The timer's part: read the Mirror's answers, only when Hermes -> Grok was ever used here. Never raises."""
         try:
-            if os.path.lexists(self.central / h2g.STATE_FILE) and self.to_grok_beta_on():
+            if os.path.lexists(self.central / h2g.STATE_FILE):
                 self.to_grok_poll()
         except Exception:  # the timer's other work goes on whatever happens here
             log.exception("grok-bot-twin: reading the Mirror's answers failed")
@@ -349,13 +358,12 @@ class H2GMixin:
         return self._h2g_call(pid, "give_up")
 
     def h2g_directions(self, pid: str, item: str) -> dict:
-        """For the panel: hermes_to_grok / both are "ok" only while the twin is allowed for `item` AND the Mirror
-        has permission for its bot; else "needs_mirror"."""
-        if not self.to_grok_beta_on() and not self._h2g_is_sample(pid):
-            return {"hermes_to_grok": "not_yet", "both": "not_yet"}  # the beta is off: nothing goes to Grok
+        """For the panel: hermes_to_grok / both are "ok" while the twin is allowed for `item` (the owner's own choice in
+        the Hermes -> Grok sheet or terminal; the preview itself says when the Mirror is not ready yet); else
+        "needs_mirror"."""
         x = self._h2g(pid)
         bot = self._h2g_bot(pid)
-        ok = item in x.allowed(pid) and bool(bot) and x.writer.permission(bot) == "ready"
+        ok = item in x.allowed(pid) and bool(bot)
         s = "ok" if ok else "needs_mirror"
         return {"hermes_to_grok": s, "both": s}
 
@@ -406,7 +414,7 @@ def register_panel() -> bool:
 
 
 # ---- the terminal: hermes twin to-grok ... ---------------------------------------------------------------------------
-ACTIONS = ("show", "allow", "disallow", "apply", "undo", "resolve", "runner", "give-up", "beta")
+ACTIONS = ("show", "allow", "disallow", "apply", "undo", "resolve", "runner", "give-up", "beta")  # beta: says it is gone
 _ITEM_WORDS = {"name": "Name", "description": "Description", "instructions": "Instructions", "routines": "Routines"}
 
 
@@ -424,8 +432,15 @@ def _change_lines(p: dict) -> list:
                     state = "on or paused in Grok as it is now"
                 new = (": replaces any routine of this name in Grok (Hermes cannot see Grok's routines)"
                        if c.get("grok_unknown") else ": new in Grok")
-                out.append(f"  Routine \"{a.get('name')}\" ({a.get('schedule')}, {state})"
-                           + (new if b is None else ": changed"))
+                sched = a.get("schedule_words") or a.get("schedule")
+                out.append(f"  Routine \"{a.get('name')}\" ({sched}, {state})" + (new if b is None else ": changed"))
+                if b is not None and b.get("schedule") != a.get("schedule"):
+                    out.append(f"    schedule: {b.get('schedule')} → {a.get('schedule')}")
+                if b is None:
+                    out += ["    prompt: " + line for line in str(a.get("prompt") or "").splitlines()]
+                elif b.get("prompt") != a.get("prompt"):
+                    out += ["    " + line for line in h2g.text_diff(str(b.get("prompt") or ""),
+                                                                    str(a.get("prompt") or ""), label="Grok")]
         elif item == "instructions":
             out.append("  Instructions:")
             out += ["    " + line for line in c.get("diff") or []]
@@ -451,14 +466,8 @@ def cmd_to_grok(a: Any) -> int:
         action, rest = vals[idx], vals[idx + 1:]
     else:
         pair, rest = (" ".join(vals) or None), []
-    if action == "beta":  # the whole plugin, no twin: hermes twin to-grok beta [on|off]
-        owner_only(False) if rest else None
-        if pair or len(rest) > 1 or (rest and rest[0].lower() not in ("on", "off")):
-            raise EngineError("usage", "Say on or off: hermes twin to-grok beta on")
-        if not rest:
-            cli._out("Hermes to Grok (beta) is " + ("on." if svc.to_grok_beta_on() else "off. " + BETA_HOW))
-            return 0
-        cli._out(svc.to_grok_set_beta(rest[0].lower() == "on")["sentence"])
+    if action == "beta":  # gone: Hermes to Grok is per twin now. Says so, changes nothing
+        cli._out(NO_BETA)
         return 0
     pid = cli._one(svc, pair)
     if action in ("allow", "apply", "undo", "resolve", "runner", "give-up"):
@@ -472,9 +481,6 @@ def cmd_to_grok(a: Any) -> int:
         v = svc.to_grok_info(pid)
         if a.json:
             cli._out(json.dumps(v, ensure_ascii=False, indent=1))
-            return 0
-        if not v.get("beta"):
-            cli._out(v.get("beta_note") or BETA_OFF)
             return 0
         if not v["allowed"]:
             cli._out("The Mirror may not change this bot in Grok. To allow it: hermes twin to-grok "
@@ -506,6 +512,16 @@ def cmd_to_grok(a: Any) -> int:
         v = getattr(svc, f"to_grok_{action}")(pid, items)
         cli._out("The Mirror may change in Grok: " + (", ".join(_ITEM_WORDS[i].lower() for i in v["allowed"])
                                                       or "nothing") + ".")
+        g = v.get("grant") or {}
+        if action == "allow" and g.get("rule"):
+            cli._out(f"Grok needs this once. In {g['where']}, add: \"{g['rule']}\"")
+        r = v.get("revoke") or {}
+        if r:
+            cli._out(r.get("sentence") or "")
+            if r.get("rule"):
+                cli._out(f"  \"{r['rule']}\"")
+            if r.get("forgot"):
+                cli._out(f"{r['forgot']} change(s) still waiting for the Mirror were taken back.")
         return 0
     if action in ("apply", "undo"):
         if len(rest) != 1 or not h2g.CHANGE_RE.match(rest[0]):
@@ -535,7 +551,7 @@ def setup(subs: Any) -> None:
     p.add_argument("args", nargs="*", metavar="[TWIN] [ACTION ...]",
                    help="show (default) | allow [ITEMS|all] | disallow [ITEMS|all] | apply ID | undo ID | "
                         "resolve ITEM hermes|grok | runner ROUTINE grok|hermes | give-up (stop waiting for the Mirror) | "
-                        "beta on|off (Hermes to Grok is a beta, off until you turn it on)")
+                        "(off for every twin until you allow it)")
     p.add_argument("--json", action="store_true", help="Machine-readable output")
 
 

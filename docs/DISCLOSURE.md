@@ -380,27 +380,37 @@ bot in your account, so any of your bots can change a skill your twin sent, and 
 The heartbeat also says how many skills the library holds. It makes no network calls; the sync bot copies files
 between the box and the shared folder. Every run of the sync bot's routine spends Grok credit.
 
-### Hermes → Grok through the Mirror bot (a beta, off by default; off for every twin until you allow it)
+### Hermes → Grok through the Mirror bot (off for every twin until you allow it)
 
-Hermes → Grok is a beta and is off for the whole plugin until you turn it on in your own terminal
-(`hermes twin to-grok beta on`; `beta off` turns it off again). A request from another computer, a command a chat
-started, and the plugin's local API cannot turn it on. While it is off, allowing, applying, undoing, settling a
-difference and moving a routine are refused, the timer reads and sends nothing, the What syncs rows do not offer
-Hermes → Grok, and nothing is written to the skill sync folder's `to-grok/`. Allowing and making changes in Grok
-are refused, also on the Twins page's own routes, inside a request from another computer, and a command a chat
-started cannot do them either.
+Hermes → Grok is off for every twin until you allow that twin; there is no switch for the whole plugin (the old
+`hermes twin to-grok beta` only says so and changes nothing). For a twin you never allowed, nothing is sent, the
+timer sends nothing, and no request for it is written to the skill sync folder's `to-grok/`. Allowing, applying,
+undoing, settling a difference, moving a routine and giving up on the Mirror are refused, also on the Twins page's
+own routes, inside a request from another computer, and a command a chat started cannot do them either. Stopping
+(`disallow`) is always accepted: it only takes changes back.
 
-Then only for a twin and the items you allow (`hermes twin to-grok TWIN allow name description instructions routines`)
+Changes go only for a twin and the items you allow (`hermes twin to-grok TWIN allow name description instructions routines`)
 and only while that item is set to "Hermes → Grok" or "Both ways". In its data folder the plugin keeps `h2g.json`:
 what you allowed, the last values it knows Grok held (to find what changed and to undo), where each routine runs,
 and a record of the changes (200 at most). Nothing is sent before you saw the preview and applied that very
 preview. A change goes as two files in your skill sync folder: `to-grok/<change id>.json` (the bot's id and name,
 the new values, and the exact message for the bot) and `to-grok/<change id>.json.mac` (its signature with the inbox
-pass; the request also carries, signed, the ids of the bots you allowed). The Mirror bot checks the signature with
-the script in its box, which refuses a request whose bot is not one you allowed in Hermes (the Mirror's own
-`status/approved.json` is never trusted for this), sends that message to that one bot only, and writes
+pass; the request also carries, signed, the ids of the bots you allowed). Next to them the plugin keeps
+`to-grok/allowed.json` and `to-grok/allowed.json.mac`: the bots you allow right now and the ids of the requests
+Hermes still waits for, with a number that only grows, signed with the same pass and rewritten each time you allow or
+stop a twin, make a change, stop waiting, or an answer comes back (and emptied when you remove Grok Bot Twin). The bot's name goes into a request only when it is a plain short name; otherwise the id alone. Every text,
+routine name and prompt sits in the message between its own BEGIN and END lines, as data. The Mirror bot checks
+the signature with the script in its box, which refuses a request whose bot is not in both lists (the one signed
+into the request and the current `allowed.json`), a missing or unsigned `allowed.json`, one older than the request
+was signed with or than one the box saw before, a request Hermes no longer waits for (answered, stopped or given
+up, even when a saved copy is put back), a request older than 14 days, and a request it showed already (the
+Mirror's own `status/approved.json` is never trusted for this). It sends that message to that one bot only, and writes
 back `status/to-grok/<change id>.json` (what was done) and `status/bots/<bot id>.json` (the bot's name and
-description now); the plugin reads only those small files, as data of known shapes. The new values reach Grok:
+description now); the plugin reads only those small files, as data of known shapes, and takes only the name and
+description from the read-back (botport's own read on this computer wins; instructions or routines in it are
+ignored). The Mirror's box keeps, in its skill sync folder (`/workspace/skill-sync`), the copies of requests it took
+down (with their instruction texts and routine prompts), the list of the request ids it showed (`.work/to-grok-answered`)
+and the newest allowlist number it saw. The new values reach Grok:
 that is the point, so instructions you write in Hermes for such a twin are read by Grok. Never sent: a text that
 looks like a password or key, an empty text, or the removal of every routine at once. Every Mirror run spends Grok
 credit, and saving a new routine asks for your Allow in that bot's chat in Grok.
@@ -409,7 +419,11 @@ The Auto-Review rule the plugin shows you to add in Grok (Settings > Permissions
 Asking) names the bot by its stable id (with its display name in quotes only when that name has no comma, quote,
 line break or linking word such as "and") and the Mirror by the name in the `mirror_name` setting. It covers only
 edits that the Mirror asks that one bot to make to its own name, description, instructions and existing routines;
-saving a new routine is not covered and keeps Grok's own Allow question in that bot's chat.
+saving a new routine is not covered and keeps Grok's own Allow question in that bot's chat. The plugin keeps the
+exact rule text it showed you in `h2g.json`. To stop: `hermes twin to-grok TWIN disallow` (or **Stop changes in
+Grok** on the Twins page). That takes the bot out of `allowed.json`, takes that twin's requests still waiting out of
+the skill sync folder, and shows the exact rule to delete in Grok (Settings > Permissions > Auto-Review > Allow
+without Asking). Delete it there: until you do, Grok would still let the Mirror ask that bot for such edits.
 
 ### The background helper (the one file outside the Hermes folder and your skill sync folder)
 

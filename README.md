@@ -246,11 +246,12 @@ One table says it all. The Twins page shows the same one (a twin's **…** menu,
 table**), and so does `hermes twin copies` in a terminal. Per twin, **What syncs** in its Details (and
 `hermes twin syncs TWIN`) shows each item with the way it goes, when it last synced, and what this version cannot
 do yet; a row that needs the Mirror or is not in this version yet says so and cannot be switched on.
-Hermes → Grok (name, description, instructions and routines made in Grok by the Mirror bot) is a beta, off by
-default: only `hermes twin to-grok beta on` in your own terminal turns it on, then `hermes twin to-grok TWIN allow`
-per twin, and nothing is sent until you look at the preview and apply it. The Auto-Review rule it shows for Grok
-names the bot by its id and covers only edits of that bot's own name, description, instructions and existing
-routines, never a new routine.
+Hermes → Grok (name, description, instructions and routines made in Grok by the Mirror bot) is off for every twin
+until you allow that twin (`hermes twin to-grok TWIN allow`, or the twin's **Hermes → Grok…** on the Twins page),
+and nothing is sent until you look at the preview and apply exactly that preview. The Auto-Review rule it shows for
+Grok names the bot by its id and covers only edits of that bot's own name, description, instructions and existing
+routines, never a new routine; stopping (`hermes twin to-grok TWIN disallow`) names that exact rule for you to delete
+in Grok.
 
 <!-- what-copies:begin (written by twin/copies.py: change the table there) -->
 
@@ -264,9 +265,9 @@ routines, never a new routine.
 | Grok memory | Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory facts, which need skill sync. |
 | Grok model setting | Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in Hermes. |
 | **From Hermes back to Grok** | |
-| Name, description and instructions | You make the same change in Grok yourself. |
+| Name, description and instructions | Off for every twin until you allow it. Then, with skill sync set up, you see a preview of each change and apply it. A bot in your own Grok account makes it there, and you can undo it. Otherwise you make the same change in Grok yourself. |
 | Skills | With skill sync, after you press Send to Grok: a skill Grok does not have yet is installed there. A skill Grok already has under that name is not replaced; paste the change into Grok yourself. Without skill sync you paste them all yourself. |
-| Routines and connections | You change them in Grok yourself. |
+| Routines and connections | Routines go like the name, once you allow them for a twin. Each routine runs in one place that you choose, never in both. Connections you change in Grok yourself. |
 | **Between your own computers** | |
 | Name and description | By itself, in seconds, once the other computer is linked and Hermes is open on both. |
 | Skills | Off until you switch it on. Then the text of each twin's skills follows the Mac with the Grok app. A skill changed on both computers asks you which one to keep. |

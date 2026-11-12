@@ -60,6 +60,10 @@ RUNNERS = ("hermes", "grok")
 CHANGE_RE = re.compile(r"^c-[0-9a-f]{16}\Z")
 RKEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
 CRON_RE = re.compile(r"^[0-9A-Za-z*/,\-#?]+(?: [0-9A-Za-z*/,\-#?]+){4,6}\Z")
+# what a schedule must be to go to Grok: cron fields of digits and signs, or month / day names (never other words)
+_CRON_NAMES = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|MON|TUE|WED|THU|FRI|SAT|SUN"
+_CRON_WORD = r"(?:[0-9*?LW#/,-]+|(?:%s)(?:[-,/](?:[0-9]+|%s))*)" % (_CRON_NAMES, _CRON_NAMES)
+SCHEDULE_RE = re.compile(r"^%s(?: %s){4,6}\Z" % (_CRON_WORD, _CRON_WORD), re.I)
 _CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f​-‏ -‮⁠-⁯﻿\ud800-\udfff]")
 _LOCK = threading.RLock()
 
@@ -70,6 +74,24 @@ NOT_WANTED = "The {item} is set to stay as it is in Grok (What syncs: choose Her
 CONFLICT = ("The {item} changed in Grok AND in Hermes since they were last the same. Nothing is sent until you "
             "choose which one to keep.")
 HELD_SECRET = "The {item} holds something that looks like a password or key, so Hermes does not send it to Grok."
+HELD_ORDER = ("The {item} reads like an instruction to bots, and in Grok every bot sees the other bots' names and "
+              "descriptions, so Hermes does not send it. Reword it as a plain description.")
+# a name or description that speaks to bots: Grok shows it to every other bot of the account (the Mirror
+# would otherwise put such a sentence in front of all of them), so it is held, never sent. Instructions and routine
+# prompts are the bot's own orders and are not judged here.
+_TO_BOTS = re.compile(
+    r"(?i)\b(?:note|message|request|order|instruction)s?\s+(?:to|for)\s+(?:any|every|all|each|other|the)\b[^.\n]{0,20}\bbots?\b"
+    r"|\b(?:message|tell|ask|instruct|contact|email|ping|rename|change|delete|remove|edit)\b[^.\n]{0,30}"
+    r"\b(?:any|every|all|each|other)\s+(?:other\s+)?(?:bots?|teammates?)\b"
+    r"|\b(?:ignore|disregard|forget|skip|override)\b[^.\n]{0,20}\b(?:your|the|all|any|previous|prior|above)\b"
+    r"[^.\n]{0,20}\b(?:steps?|instructions?|rules?|orders?|tasks?|charter)\b")
+
+
+def speaks_to_bots(text: str) -> bool:
+    """True when a name or description reads like an order to bots (the shared filter's orders, or one aimed at
+    other bots)."""
+    from . import xs_memory  # (the filter the memory layers use; imported here to keep this module light)
+    return bool(_TO_BOTS.search(text) or xs_memory._ORDERS.search(text))
 STALE = "Something changed since you looked at this preview. Look again, then apply the new one."
 NO_UNDO = "Grok no longer holds what this change put there (it was changed in Grok since), so undo would lose that."
 NOTHING = "Hermes and Grok already match: nothing to send."
@@ -82,6 +104,16 @@ GAVE_UP = "No answer from the Mirror: Hermes stopped waiting. If the Mirror make
 PENDING = ("The Mirror has not made the last change yet (it does on its next run). Nothing more is sent until it "
            "answers.")
 EMPTY = "The {item} is empty in Hermes. Hermes never empties it in Grok: change it in Grok itself if you want that."
+BOTH_ON = ("The routine \"{name}\" is set to run in Grok, but its Hermes copy is switched on: it would run twice. "
+           "Pause it in Hermes, or choose Hermes as where it runs.")
+BAD_SCHEDULE = "The schedule of routine \"{name}\" is not a plain cron schedule, so Hermes does not send it to Grok."
+DISALLOWED = "You stopped Hermes to Grok for this twin, so this change is not made."
+NOT_PUBLISHED = ("Hermes could not update the list in skill sync's shared folder that tells the Mirror which bots it "
+                 "may change. Open the shared folder, then stop it again; until then, also delete the rule in Grok.")
+REVOKE_WHERE = "Grok: Settings > Permissions > Auto-Review > Allow without Asking"
+REVOKE = ("The Mirror may no longer change this bot from Hermes. In Grok, delete exactly this rule (it is the one you "
+          "added when you allowed it).")
+GRANT_WHERE = "Grok: Settings > Permissions > Auto-Review > Allow without Asking > Add rule"
 NO_ROUTINES = ("Hermes has no routines for this twin now, so Grok's are left as they are (Hermes never removes "
                "every routine at once).")
 
@@ -332,11 +364,12 @@ def _serial(fn: Callable) -> Callable:
     return run
 
 
-def text_diff(before: str, after: str, limit: int = 400, label: str = "Grok now") -> list[str]:
+def text_diff(before: str, after: str, limit: Optional[int] = None, label: str = "Grok now") -> list[str]:
+    """The whole line diff (the preview shows exactly what is sent: nothing is cut unless `limit` is given)."""
     lines = list(difflib.unified_diff(before.splitlines(), after.splitlines(), label, "Hermes", lineterm="", n=2))
-    if len(lines) > limit:
+    if limit is not None and len(lines) > limit:
         lines = lines[:limit] + [f"... {len(lines) - limit} more lines"]
-    return [safe.cap(l, 400) for l in lines]
+    return lines
 
 
 def _no_switch(r: Optional[dict]) -> Optional[dict]:
@@ -348,8 +381,33 @@ def _no_switch_all(rs: dict) -> dict:
 
 
 def _routine_view(r: Optional[dict]) -> Optional[dict]:
-    return None if r is None else {"name": r["name"], "schedule": r["schedule"], "enabled": r["enabled"],
-                                    "prompt": safe.cap(r["prompt"], 2000)}
+    if r is None:
+        return None
+    out = {"name": r["name"], "schedule": r["schedule"], "enabled": r["enabled"], "prompt": r["prompt"]}  # in full
+    words = schedule_words(r["schedule"])
+    if words:
+        out["schedule_words"] = words
+    return out
+
+
+_DAYS = {"*": "every day", "1-5": "Monday to Friday", "MON-FRI": "Monday to Friday", "0,6": "Saturday and Sunday",
+         "6,0": "Saturday and Sunday", "SAT,SUN": "Saturday and Sunday"}
+
+
+def schedule_words(sched: Any) -> Optional[str]:
+    """Plain words for a simple cron schedule ("0 9 * * *" -> "every day at 09:00 UTC"); None when not simple."""
+    parts = str(sched or "").split()
+    if len(parts) != 5 or parts[2:4] != ["*", "*"]:
+        return None
+    m, h, _, _, dow = parts
+    days = _DAYS.get(dow.upper())
+    if days is None:
+        return None
+    if m.isdigit() and h.isdigit() and int(m) < 60 and int(h) < 24:
+        return f"{days} at {int(h):02d}:{int(m):02d} UTC"
+    if m.isdigit() and int(m) < 60 and h == "*":
+        return f"{days}, every hour at minute {int(m)}"
+    return None
 
 
 # ---- the planner -----------------------------------------------------------------------------------------------------
@@ -408,7 +466,9 @@ class H2G:
         a = self._read()["allow"].get(pid)
         return [i for i in ITEMS if isinstance(a, dict) and i in (a.get("items") or [])]
 
-    def allow(self, pid: str, items: Any) -> dict:
+    def allow(self, pid: str, items: Any, rule: Optional[str] = None) -> dict:
+        """`rule`: the exact Auto-Review rule text the owner is shown to add in Grok, recorded so that stopping can
+        name exactly the rule to delete."""
         if not valid_id(pid):
             raise H2GError("bad_input", "Not a twin.")
         items = list(ITEMS) if items in ("all", None) else items
@@ -419,24 +479,74 @@ class H2G:
             raise H2GError("no_bot", "Hermes does not know which Grok bot this twin follows.")
         with _LOCK, store.locked():
             d = self._read()
-            d["allow"][pid] = {"items": [i for i in ITEMS if i in items], "bot": bot, "at": now_iso()}
+            entry = {"items": [i for i in ITEMS if i in items], "bot": bot, "at": now_iso()}
+            if isinstance(rule, str) and rule:
+                entry["rule"] = rule
+            d["allow"][pid] = entry
             if pid not in d["base"]:  # the first base is Grok as the writer reads it (or Hermes now: nothing to send)
                 d["base"][pid] = self._first_base(pid, bot)
             self._write(d)
+        self._publish()
         return self.info(pid)
 
+    def _publish(self, strict: bool = False) -> bool:
+        """The writer's signed current allowlist and the requests still waiting (the Mirror's box checks every request
+        against it). `strict`: False when it could not be rewritten (the caller says so; never silently)."""
+        pub = getattr(self.writer, "publish_allowed", None)
+        if pub is None:
+            return True
+        if not strict:
+            pub()
+            return True
+        try:
+            pub(strict=True)
+            return True
+        except Exception:  # OSError, skill_sync.SkillSyncProblem: the shared folder could not be written
+            return False
+
     def disallow(self, pid: str, items: Any = "all") -> dict:
+        """Stop some items, or all. When the twin is fully off: its requests still waiting leave the shared folder
+        (marked failed; a half-made routine move stays on the safe side), the writer's signed allowlist no longer
+        names its bot, and the answer carries `revoke`: the exact rule to delete in Grok."""
+        forgot: list = []
         with _LOCK, store.locked():
             d = self._read()
             a = d["allow"].get(pid) or {}
             keep = [] if items in ("all", None) else [i for i in (a.get("items") or []) if i not in items]
+            removed = {i for i in (a.get("items") or []) if i not in keep}
             if keep:
                 a["items"] = keep
                 d["allow"][pid] = a
             else:
                 d["allow"].pop(pid, None)
+            for c in d["changes"]:  # a change still waiting that touches an item no longer allowed is not made
+                if c.get("pid") != pid or c.get("state") != "sent":
+                    continue
+                touched = {("routines" if str(i).startswith("routine:") else i) for i in c.get("items") or []}
+                if not keep or touched & removed:
+                    c["state"], c["message"] = "failed", DISALLOWED
+                    forgot.append(c["id"])
             self._write(d)
-        return self.info(pid)
+            forget = getattr(self.writer, "forget", None)
+            for cid in forgot:
+                if forget is not None:
+                    forget(cid)
+            bot = a.get("bot")
+            still = any(isinstance(e, dict) and e.get("bot") == bot for e in d["allow"].values())
+            fb = getattr(self.writer, "forget_bot", None)
+            if not keep and bot and not still and fb is not None:
+                fb(bot)  # also a request this computer no longer has a record of
+            if forgot:
+                self.finish_moves()
+        published = self._publish(strict=True)
+        out = self.info(pid)
+        if not published:
+            out["warning"] = NOT_PUBLISHED
+        if not keep and a:
+            out["revoke"] = {"rule": a.get("rule") or "", "where": REVOKE_WHERE,
+                             "sentence": REVOKE.format(where=REVOKE_WHERE) + ("" if published else " " + NOT_PUBLISHED),
+                             "forgot": len(forgot), "published": published}
+        return out
 
     def _first_base(self, pid: str, bot: str) -> dict:
         """What Grok holds when the owner first allows: the read-back for what the writer can read, and Hermes as it
@@ -491,10 +601,13 @@ class H2G:
             if _secrets.has_secret(now_h[item]):
                 held.append({"item": item, "code": "secret", "why": HELD_SECRET.format(item=item)})
                 continue
+            if item != "instructions" and speaks_to_bots(now_h[item]):
+                held.append({"item": item, "code": "order", "why": HELD_ORDER.format(item=item)})
+                continue
             if known and grok[item] == now_h[item]:
                 continue  # already the same in Grok (made there by hand): only the base moves, in apply
-            ch = {"item": item, "before": safe.cap(base[item], 2000) if item != "instructions" else None,
-                  "after": safe.cap(now_h[item], 2000) if item != "instructions" else None}
+            # the full texts, exactly as sent (each is capped like the item itself, CAPS, never cut further here)
+            ch = {"item": item, "before": base[item], "after": now_h[item]}
             if not known:  # Grok's text is not read: say plainly what the base is and that it is replaced whole
                 ch["grok_unknown"] = True
                 ch["note"] = REPLACES_ALL.format(item=item)
@@ -538,6 +651,13 @@ class H2G:
                     not (keep and _no_switch(g) == _no_switch(want)):
                 held.append({"item": f"routine:{key}", "code": "conflict",
                              "why": CONFLICT.format(item=f"routine \"{(h or b)['name']}\"")})
+                continue
+            if want is not None and runner.get(key) == "grok" and h["enabled"]:
+                held.append({"item": f"routine:{key}", "code": "both_on", "why": BOTH_ON.format(name=want["name"])})
+                continue
+            if want is not None and not SCHEDULE_RE.match(want["schedule"]):
+                held.append({"item": f"routine:{key}", "code": "schedule",
+                             "why": BAD_SCHEDULE.format(name=want["name"])})
                 continue
             if want is not None and _secrets.has_secret(want["prompt"]):
                 held.append({"item": f"routine:{key}", "code": "secret",
@@ -583,11 +703,40 @@ class H2G:
         a = d["allow"].get(pid) or {}
         base = d["base"].get(pid) or {}
         mine = [c for c in d["changes"] if c.get("pid") == pid]
+        pending = any(c.get("state") == "sent" for c in mine)
+        changes = []
+        for c in mine[-20:]:
+            row = {k: c.get(k) for k in ("id", "at", "state", "items", "undo_of", "undone_by", "message")}
+            row["kind"] = "move" if c.get("kind") == "move" else "change"
+            why = self._undo_why(c, pending)
+            row["can_undo"] = why is None
+            if why:
+                row["undo_why"] = why
+            changes.append(row)
+        grant = None
+        if a.get("items"):
+            grant = {"items": self.allowed(pid), "at": a.get("at"), "rule": a.get("rule") or "", "where": GRANT_WHERE}
         return {"pair_id": pid, "allowed": self.allowed(pid), "bot_known": bool(a.get("bot") or self._bot(pid)),
                 "writer": getattr(self.writer, "kind", "?"), "base_at": base.get("at"), "base_from": base.get("from"),
-                "runner": self._runners_now(pid, d),
-                "changes": [{k: c.get(k) for k in ("id", "at", "state", "items", "undo_of", "undone_by", "message")}
-                            for c in mine[-20:]]}
+                "runner": self._runners_now(pid, d), "grant": grant, "changes": changes}
+
+    @staticmethod
+    def _undo_why(c: dict, pending: bool) -> Optional[str]:
+        """Why undo() would refuse this change, from the record alone (no read of Grok): None when it may work."""
+        if c.get("kind") == "move":
+            return "It moved a routine: to move it back, choose where it runs again."
+        if c.get("undone_by"):
+            return "It was undone already."
+        if c.get("state") != "done":
+            return "It was not made in Grok." if c.get("state") == "failed" else "The Mirror has not made it yet."
+        if pending:
+            return "Wait for the Mirror's answer to the last change first."
+        src = c.get("before_src") or {}
+        if not any(op.get("op") != "set" or (src.get(op.get("item"), "hermes") != "hermes"
+                                             and str((c.get("before") or {}).get(op.get("item")) or "").strip())
+                   for op in c.get("ops") or []):
+            return UNKNOWN_BEFORE
+        return None
 
     def _runners_now(self, pid: str, d: dict) -> dict:
         a = d["allow"].get(pid) or {}
@@ -602,8 +751,9 @@ class H2G:
         out = {k: v for k, v in plan.items() if not k.startswith("_") and k != "ops"}
         out["nothing"] = not plan["ops"]
         if plan["ops"] or plan["held"]:
-            out["sentence"] = (f"{len(plan['ops'])} change(s) to make in Grok" +
-                               (f", {len(plan['held'])} held" if plan["held"] else ""))
+            n, h = len(plan["changes"]), len(plan["held"])
+            out["sentence"] = ((f"{n} change to make in Grok" if n == 1 else f"{n} changes to make in Grok") if n else
+                               "Nothing to make in Grok now") + (f", {h} held" if h else "") + "."
         elif plan["off"]:
             out["sentence"] = "Nothing is sent: " + plan["off"][0]["why"]
         else:
@@ -734,6 +884,8 @@ class H2G:
             if rec and rec.get("state") in ("done", "failed"):
                 self._finish(c, rec)
                 out.append({"change_id": c["id"], "state": rec["state"]})
+        if out:
+            self._publish()  # answered ids leave the signed list of waiting requests
         return out
 
     @_serial
@@ -746,6 +898,7 @@ class H2G:
         c = next((c for c in d["changes"] if c.get("id") == change_id and c.get("pid") == pid), None)
         if c is None or c.get("state") != "done":
             raise H2GError("no_change", "There is no change of this twin with that id that was made in Grok.")
+        self._still_allowed(pid, c.get("items") or [], c["bot"])
         if c.get("undone_by"):
             raise H2GError("undone", "That change was undone already.")
         if c.get("kind") == "move":
@@ -764,6 +917,9 @@ class H2G:
                 was = was if isinstance(was, str) else ""
                 if not was.strip():
                     skipped.append(op["item"])  # it was empty before: Hermes never empties a text in Grok
+                    continue
+                if _secrets.has_secret(was) or (op["item"] != "instructions" and speaks_to_bots(was)):
+                    skipped.append(op["item"])  # the same holds as a change: a value put back is sent too
                     continue
                 ops.append({"op": "set", "item": op["item"], "value": was})
             else:
@@ -801,6 +957,20 @@ class H2G:
                 self._write(d)
         return out
 
+    def _still_allowed(self, pid: str, items: list, bot: str) -> None:
+        """Undo and a runner move send to Grok too: the same checks as apply (allowlist, the owner's direction in
+        What syncs, the bot the twin was allowed for, the Mirror's permission)."""
+        allowed = self.allowed(pid)
+        if not allowed or not bot or (self._read()["allow"].get(pid) or {}).get("bot") not in (None, bot):
+            raise H2GError("not_allowed", NOT_ALLOWED)
+        for i in {("routines" if str(x).startswith("routine") else x) for x in items}:
+            why = self._item_open(pid, i, allowed) if i in ITEMS else None
+            if why:
+                raise H2GError("not_allowed", why)
+        if self.writer.permission(bot) != "ready":
+            raise H2GError("no_permission", "The Mirror has no permission to change this bot: set up pre-approval "
+                                            "in Grok first.")
+
     # -- routines run in one place (rule 7)
     def runner(self, pid: str, rkey: str) -> str:
         """"hermes", "grok", or "nowhere" (a handover that stopped half way: paused on both sides, never on in both)."""
@@ -818,6 +988,7 @@ class H2G:
         if "routines" not in self.allowed(pid):
             raise H2GError("not_allowed", ITEM_NOT_ALLOWED.format(item="routines"))
         d = self._read()
+        self._still_allowed(pid, ["routines"], (d["allow"].get(pid) or {}).get("bot") or self._bot(pid))
         if any(x.get("pid") == pid and x.get("state") == "sent" for x in d["changes"]):
             raise H2GError("pending", PENDING)
         bot = (d["allow"].get(pid) or {}).get("bot") or self._bot(pid)
@@ -897,6 +1068,7 @@ class H2G:
                 forget(c["id"])
         self._write(d)
         self.finish_moves()
+        self._publish()  # the cancelled ids leave the signed list: the box never makes them, even from a saved copy
         return {"state": "done", "sentence": GAVE_UP, "gave_up": [c["id"] for c in mine]}
 
     @_serial

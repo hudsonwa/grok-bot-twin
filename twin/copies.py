@@ -56,13 +56,16 @@ _ROWS: tuple[tuple[str, str, str, str, Optional[str], Optional[str]], ...] = (
      "Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in "
      "Hermes.", None, None),
     ("back-persona", "back", "Name, description and instructions",
-     "You make the same change in Grok yourself.", None, None),
+     "Off for every twin until you allow it. Then, with skill sync set up, you see a preview of each change and "
+     "apply it. A bot in your own Grok account makes it there, and you can undo it. Otherwise you make the same "
+     "change in Grok yourself.", None, None),
     ("back-skills", "back", "Skills",
      "With skill sync, after you press Send to Grok: a skill Grok does not have yet is installed there. A skill "
      "Grok already has under that name is not replaced; paste the change into Grok yourself. Without skill sync "
      "you paste them all yourself.", None, None),
     ("back-setup", "back", "Routines and connections",
-     "You change them in Grok yourself.", None, None),
+     "Routines go like the name, once you allow them for a twin. Each routine runs in one place that you choose, "
+     "never in both. Connections you change in Grok yourself.", None, None),
     ("fleet-name", "computers", "Name and description",
      "By itself, in seconds, once the other computer is linked and Hermes is open on both.", None, None),
     ("fleet-skills", "computers", "Skills",

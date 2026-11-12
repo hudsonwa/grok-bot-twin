@@ -188,8 +188,24 @@ def test_to_grok_changes_refused_inside_a_request_from_another_computer(client, 
     for action, body in (("allow", {"items": "all"}), ("apply", {"change_id": "c-0123456789abcdef"}),
                          ("undo", {"change_id": "c-0123456789abcdef"}), ("resolve", {"item": "name", "keep": "hermes"}),
                          ("runner", {"routine": "morning-digest", "to": "grok"}), ("give-up", {})):
-        r = client.post(P + f"/pairs/acme-support/to-grok/{action}", json=body).json()
-        assert r["error"]["code"] == "refused", action
+        r = client.post(P + f"/pairs/acme-support/to-grok/{action}", json=body)
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "refused", action
+    # stopping only ever takes changes back: it is accepted, also inside a request
+    r = client.post(P + "/pairs/acme-support/to-grok/disallow", json={"items": "all"})
+    assert r.status_code == 200 and r.json()["allowed"] == []
     monkeypatch.setattr(tasks, "asked_turn", lambda *a, **k: False)
     assert client.post(P + "/pairs/acme-support/to-grok/allow", json={"items": "all"}).json()["allowed"]
-    assert client.post(P + "/to-grok/beta", json={"on": True}).status_code in (404, 405)  # no route turns the beta on
+    assert client.post(P + "/to-grok/beta", json={"on": True}).status_code in (404, 405)  # no plugin-wide switch
+
+
+def test_to_grok_apply_and_undo_take_only_the_exact_preview(client):
+    client.post(P + "/demo", json={"action": "start"})
+    info = client.post(P + "/pairs/acme-support/to-grok/allow", json={"items": ["name", "description"]}).json()
+    assert info["allowed"] == ["name", "description"] and "beta" not in info and info["grant"]["items"]
+    r = client.post(P + "/pairs/acme-support/to-grok/apply", json={"change_id": "c-0123456789abcdef"})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "stale"
+    r = client.post(P + "/pairs/acme-support/to-grok/undo", json={"change_id": "c-0123456789abcdef"})
+    assert r.status_code == 404 and r.json()["detail"]["code"] == "no_change"
+    assert client.post(P + "/pairs/acme-support/to-grok/apply", json={"change_id": "nope"}).status_code == 400
+    out = client.post(P + "/pairs/acme-support/to-grok/disallow", json={"items": "all"}).json()
+    assert out["allowed"] == [] and out["revoke"]["forgot"] == 0 and "where" in out["revoke"]

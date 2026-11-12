@@ -2380,9 +2380,9 @@ const WHAT_COPIES = [
   {
     title: 'From Hermes back to Grok',
     rows: [
-      { what: 'Name, description and instructions', how: 'You make the same change in Grok yourself.' },
+      { what: 'Name, description and instructions', how: 'Off for every twin until you allow it. Then, with skill sync set up, you see a preview of each change and apply it. A bot in your own Grok account makes it there, and you can undo it. Otherwise you make the same change in Grok yourself.' },
       { what: 'Skills', how: 'With skill sync, after you press Send to Grok: a skill Grok does not have yet is installed there. A skill Grok already has under that name is not replaced; paste the change into Grok yourself. Without skill sync you paste them all yourself.' },
-      { what: 'Routines and connections', how: 'You change them in Grok yourself.' }
+      { what: 'Routines and connections', how: 'Routines go like the name, once you allow them for a twin. Each routine runs in one place that you choose, never in both. Connections you change in Grok yourself.' }
     ]
   },
   {
@@ -2847,7 +2847,582 @@ function SyncsFold({ pair, onMirror, initialOpen = false, initialSaid = null }) 
   return el(Fold, { initialOpen, label: 'What syncs' }, jsx(SyncsPanel, { initialSaid, mirror: panel.mirror, onMirror, twin }))
 }
 
-function CopiesPanel({ pair, open, intervalS, fastCheck, onSkillSync, onShow, onFinish, initialTechnical = false, initialTable = false, initialSyncs = false }) {
+// ── Hermes → Grok: the owner's own changes, sent to Grok when asked ─────────
+// Off for every twin until the owner allows it, item by item. Nothing goes without the owner seeing the preview
+// first and pressing the button bound to that very preview (its change_id); every change can be put back while
+// Grok still holds what was sent. All the texts here come from the bot: React text nodes only, never markup.
+
+const TO_GROK_ITEMS = [
+  ['name', 'Name'],
+  ['description', 'Description'],
+  ['instructions', 'Instructions'],
+  ['routines', 'Routines']
+]
+const TO_GROK_KEYS = TO_GROK_ITEMS.map(([k]) => k)
+const TO_GROK_PERMISSIONS = ['ready', 'not_set_up', 'no_permission']
+const TO_GROK_STALE = 'Something changed since you looked; here is the new preview.'
+const TO_GROK_OFF = 'Nothing goes from this twin to Grok until you allow it. You see every change before it is made, and you can undo it.'
+const CHANGE_ID_RE = /^c-[0-9a-f]{16}$/
+
+// The codes the backend refuses with, in the owner's words (a code itself is never shown).
+const TO_GROK_WORDS = {
+  bad_input: ['Grok Bot Twin did not understand that request.', 'Close this and open it again.'],
+  changed_in_grok: ['This was changed in Grok after it was sent, so it is not put back.', 'Change it in Grok yourself if you want it back.'],
+  empty: ['There is nothing to send for this.', ''],
+  is_move: ['That change moved routines between Hermes and Grok.', 'Move them back from the routines in this twin\'s menu.'],
+  no_change: ['Grok already has all of this, so there is nothing to change.', ''],
+  no_permission: ['Grok has not given permission for this yet.', 'Add the rule shown here in Grok once, then try again.'],
+  not_allowed: ['This twin does not allow that change to Grok.', 'Tick it under "What may change in Grok" and press Allow.'],
+  pending: ['The last change is still waiting for the Mirror\'s next run.', 'Wait for it, or press Stop waiting.'],
+  refused: ['Changes to Grok can only be made from this page, on this computer.', ''],
+  stale: [TO_GROK_STALE, ''],
+  undone: ['That change was already put back.', '']
+}
+
+function toGrokProblem(err) {
+  const e = asProblem(err)
+  const words = TO_GROK_WORDS[e.code]
+
+  if (words) {
+    return new TwinError(words[0], e.code, words[1])
+  }
+
+  // (an unknown answer is said in the backend's words, unless they are not fit for the owner)
+  return /\bbeta\b|undefined|\bnull\b/i.test(`${e.message} ${e.hint}`) ? new TwinError(FALLBACK_PROBLEM, e.code, 'Try again.') : e
+}
+
+// Whole text, as sent: only control characters out (lines and tabs stay), never shortened for the eye.
+const wholeText = v => (typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ').slice(0, 200_000) : '')
+
+function toGrokRoutineOf(r) {
+  if (!r || typeof r !== 'object') {
+    return null
+  }
+
+  return {
+    enabled: typeof r.enabled === 'boolean' ? r.enabled : null,
+    name: clean(r.name, 120) || 'A routine',
+    prompt: wholeText(r.prompt),
+    schedule: clean(r.schedule_words, 120) || clean(r.schedule, 120)
+  }
+}
+
+function toGrokLabel(item, routine = null) {
+  const plain = TO_GROK_ITEMS.find(([k]) => k === item)
+
+  if (plain) {
+    return plain[1]
+  }
+
+  return String(item ?? '').startsWith('routine:') ? `Routine${routine?.name ? ` "${routine.name}"` : ''}` : capital(clean(item, 60)) || 'Something'
+}
+
+function toGrokPreviewOf(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  if (raw.error && typeof raw.error === 'object') {
+    return { error: toGrokProblem(problemOf(raw.error)) }
+  }
+
+  const routine = item => String(item).startsWith('routine:')
+  const changes = listOf(raw.changes)
+    .filter(c => c && typeof c === 'object' && typeof c.item === 'string')
+    .slice(0, 60) // every change that can be sent (3 texts + at most 50 routines): the preview never shows less than is sent
+    .map(c => {
+      const isRoutine = routine(c.item)
+      const before = isRoutine ? toGrokRoutineOf(c.before) : typeof c.before === 'string' ? wholeText(c.before) : null
+      const after = isRoutine ? toGrokRoutineOf(c.after) : typeof c.after === 'string' ? wholeText(c.after) : null
+
+      return {
+        after,
+        before,
+        diff: Array.isArray(c.diff) ? c.diff.filter(l => typeof l === 'string').map(wholeText) : null,
+        grokUnknown: c.grok_unknown === true,
+        item: c.item,
+        label: toGrokLabel(c.item, after ?? before),
+        note: clean(c.note, 300),
+        routine: isRoutine
+      }
+    })
+  const why = list =>
+    listOf(list)
+      .filter(h => h && typeof h === 'object')
+      .slice(0, 60)
+      .map(h => ({ conflict: h.code === 'conflict' && ['name', 'description', 'instructions'].includes(h.item), item: typeof h.item === 'string' ? h.item : '', label: toGrokLabel(h.item), why: clean(h.why, 300) }))
+
+  return {
+    blocked: clean(raw.blocked, 300),
+    changeId: typeof raw.change_id === 'string' && CHANGE_ID_RE.test(raw.change_id) ? raw.change_id : null,
+    changes,
+    held: why(raw.held),
+    nothing: raw.nothing === true || changes.length === 0,
+    off: why(raw.off),
+    pending: typeof raw.pending === 'string' && raw.pending !== '',
+    sentence: clean(raw.sentence, 400)
+  }
+}
+
+// GET /pairs/{pid}/to-grok (and every answer that has its shape), tidied once.
+function toGrokOf(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.allowed)) {
+    return null
+  }
+
+  const allowed = TO_GROK_KEYS.filter(k => raw.allowed.includes(k))
+  const grant = raw.grant && typeof raw.grant === 'object' ? { rule: wholeText(raw.grant.rule).trim(), where: clean(raw.grant.where, 300) } : null
+  const inGrok = raw.in_grok && typeof raw.in_grok === 'object' ? raw.in_grok : {}
+  const changes = listOf(raw.changes)
+    .filter(c => c && typeof c === 'object' && typeof c.id === 'string')
+    .slice(-20)
+    .map(c => ({
+      at: isoOf(c.at),
+      canUndo: c.can_undo === true && CHANGE_ID_RE.test(c.id),
+      id: c.id,
+      items: listOf(c.items).filter(i => typeof i === 'string').slice(0, 20).map(i => toGrokLabel(i)),
+      kind: c.kind === 'move' ? 'move' : 'change',
+      message: clean(c.message, 300),
+      state: ['sent', 'done', 'failed'].includes(c.state) ? c.state : 'failed',
+      undoOf: typeof c.undo_of === 'string' && c.undo_of !== '',
+      undoneBy: typeof c.undone_by === 'string' && c.undone_by !== '',
+      undoWhy: clean(c.undo_why, 300)
+    }))
+
+  return {
+    allowed,
+    changes,
+    grant: grant?.rule ? grant : null,
+    mirrorSteps: wholeText(inGrok.mirror_steps).trim(),
+    permission: TO_GROK_PERMISSIONS.includes(raw.permission) ? raw.permission : 'not_set_up',
+    preview: allowed.length > 0 ? toGrokPreviewOf(raw.preview) : null,
+    revoke: raw.revoke && typeof raw.revoke === 'object' ? { rule: wholeText(raw.revoke.rule).trim(), sentence: clean(raw.revoke.sentence, 400), where: clean(raw.revoke.where, 300) } : null,
+    where: clean(inGrok.where, 300)
+  }
+}
+
+const toGrokResultWords = res => clean(res?.sentence, 400) || clean(res?.message, 400) || (res?.state === 'sent' ? "Sent. It is made at the Mirror's next run." : 'Done.')
+
+// What every press does, apart from the sheet so each can be checked alone. `set(patch)` is handed what to show:
+// { info } (an answer of the INFO shape), { said } (one sentence for the status line), { problem }, { revoke }.
+function toGrokActs(pid, set) {
+  const path = tail => pairPath(pid, tail ? `to-grok/${tail}` : 'to-grok')
+  const read = async (said = '') => set({ info: await api(path()), problem: null, said })
+
+  async function guard(fn) {
+    set({ problem: null, said: '' })
+
+    try {
+      await fn()
+    } catch (err) {
+      const e = toGrokProblem(err)
+
+      // the preview moved on, or a change still waits: the newest preview is read again and shown
+      if (e.code === 'stale' || e.code === 'pending') {
+        try {
+          await read(e.code === 'stale' ? TO_GROK_STALE : `${e.message} ${e.hint}`.trim())
+        } catch (again) {
+          set({ problem: toGrokProblem(again) })
+        }
+
+        return
+      }
+
+      set({ problem: e })
+    }
+  }
+
+  const after = async res => {
+    await read(res?.state === 'failed' ? '' : toGrokResultWords(res))
+
+    if (res?.state === 'failed') {
+      set({ problem: new TwinError(toGrokResultWords(res), 'failed') })
+    }
+  }
+
+  return {
+    read: () => guard(() => read()),
+    // while a change waits for the Mirror: read again quietly (what was said stays; a failed read changes nothing)
+    refresh: async () => {
+      try {
+        set({ info: await api(path()) })
+      } catch {
+        // the next look tries again
+      }
+    },
+    // Allow saves the ticks as they are: what was ticked is allowed, what was unticked is not any more.
+    allow: (ticked, allowed) =>
+      guard(async () => {
+        const on = TO_GROK_KEYS.filter(k => ticked.includes(k))
+        const gone = allowed.filter(k => !on.includes(k))
+        let info = null
+
+        if (on.length > 0) {
+          info = await post(path('allow'), { items: on })
+        }
+
+        if (gone.length > 0) {
+          info = await post(path('disallow'), { items: on.length > 0 ? gone : 'all' })
+        }
+
+        if (info) {
+          set({ info, revoke: info.revoke ?? null, said: on.length > 0 ? `Allowed for this twin: ${joinWords(on.map(k => toGrokLabel(k).toLowerCase()))}.` : 'Nothing goes from this twin to Grok any more.' })
+        }
+      }),
+    stop: () =>
+      guard(async () => {
+        const info = await post(path('disallow'), { items: 'all' })
+
+        set({ info, revoke: info?.revoke ?? null, said: 'Nothing goes from this twin to Grok any more.' })
+      }),
+    apply: changeId => guard(async () => after(await post(path('apply'), { change_id: changeId }))),
+    undo: changeId => guard(async () => after(await post(path('undo'), { change_id: changeId }))),
+    // a thing changed on both sides: the owner says which one Grok keeps; the answer is the new preview
+    resolve: (item, keep, info) =>
+      guard(async () => {
+        const fresh = await post(path('resolve'), { item, keep })
+
+        set({ info: { ...info, preview: fresh }, said: keep === 'hermes' ? 'The Hermes version is in the preview now.' : 'The Grok version stays, so it is left out of the preview.' })
+      }),
+    giveUp: () =>
+      guard(async () => {
+        const res = await post(path('give-up'), {})
+
+        await read(clean(res?.sentence, 400) || 'Stopped waiting.')
+      })
+  }
+}
+
+// One text in full, in a box that scrolls when it is long (the keyboard can stop on it to scroll).
+function WholeBox({ label, text }) {
+  return el(
+    'div',
+    { className: 'flex flex-col gap-0.5' },
+    el('span', { className: SMALL }, label),
+    el('pre', { 'aria-label': label, className: cn(PRE, 'max-h-48'), role: 'group', tabIndex: 0 }, text || ' ')
+  )
+}
+
+// The instructions as lines: added ones marked "+" and read out as "added", removed ones "-" and "removed".
+function ToGrokDiff({ lines }) {
+  return el(
+    'div',
+    {
+      'aria-label': 'Line-by-line changes',
+      className: 'max-h-56 overflow-auto rounded-md border border-(--ui-stroke-tertiary) py-1.5 font-mono text-xs leading-[1.45] text-(--ui-text-secondary)',
+      role: 'group',
+      tabIndex: 0
+    },
+    lines.map((line, i) => {
+      const add = line.startsWith('+')
+      const del = line.startsWith('-')
+
+      return el(
+        'div',
+        {
+          className: cn(
+            'whitespace-pre-wrap break-words px-2.5',
+            add && 'bg-(--ui-diff-add-background) text-(--ui-diff-add-foreground)',
+            del && 'bg-(--ui-diff-remove-background) text-(--ui-diff-remove-foreground)'
+          ),
+          'data-line': add ? 'added' : del ? 'removed' : 'same',
+          key: i
+        },
+        (add || del) && el('span', { className: 'sr-only' }, add ? 'added: ' : 'removed: '),
+        line || ' '
+      )
+    })
+  )
+}
+
+function RoutineCard({ label, routine }) {
+  const state = routine.enabled === true ? 'On in Grok' : routine.enabled === false ? 'Paused in Grok' : ''
+
+  return el(
+    'div',
+    { className: 'flex flex-col gap-1' },
+    el('span', { className: SMALL }, label),
+    el('span', { className: HEADING }, routine.name),
+    el('span', { className: SMALL }, [routine.schedule && `Runs ${routine.schedule}`, state].filter(Boolean).join(' · ') || 'No schedule given'),
+    jsx(WholeBox, { label: `${label}: what it asks the bot`, text: routine.prompt })
+  )
+}
+
+function ToGrokChange({ change }) {
+  const nowLabel = 'Now in Grok'
+  const thenLabel = 'After the change'
+  const side = (label, value, none) =>
+    change.routine ? (value ? jsx(RoutineCard, { label, routine: value }) : el('p', { className: SMALL }, `${label}: ${none}`)) : value === null ? el('p', { className: SMALL }, `${label}: ${none}`) : jsx(WholeBox, { label, text: value })
+
+  return el(
+    'li',
+    { className: BOX },
+    el('h4', { className: HEADING }, change.label),
+    change.note && el('p', { className: SMALL }, change.note),
+    change.diff && change.diff.length > 0 && jsx(ToGrokDiff, { lines: change.diff }),
+    change.grokUnknown ? el('p', { className: SMALL }, `${nowLabel}: not known, Grok's copy could not be read.`) : side(nowLabel, change.before, change.routine ? 'not in Grok yet' : 'empty'),
+    side(thenLabel, change.after, change.routine ? 'removed from Grok' : 'empty')
+  )
+}
+
+function ToGrokPreview({ preview, busy, onApply, onGiveUp, onRetry, onResolve }) {
+  if (preview.error) {
+    return jsx(InlineProblem, { error: preview.error, onRetry, retryLabel: 'Look again' })
+  }
+
+  const why = (title, list) =>
+    list.length > 0 &&
+    el(
+      'div',
+      { className: 'flex flex-col gap-0.5' },
+      el('span', { className: HEADING }, title),
+      el(
+        'ul',
+        { className: cn(BODY, 'flex flex-col gap-1') },
+        list.map((h, i) =>
+          el(
+            'li',
+            { className: 'flex flex-col gap-1', key: i },
+            el('span', {}, h.why ? `${h.label}: ${h.why}` : h.label),
+            h.conflict &&
+              onResolve &&
+              el(
+                'div',
+                { className: 'flex flex-wrap gap-2' },
+                el(Button, { 'aria-label': `${h.label}: send the Hermes version`, disabled: Boolean(busy), onClick: () => onResolve(h.item, 'hermes'), variant: 'secondary' }, 'Send the Hermes version'),
+                el(Button, { 'aria-label': `${h.label}: keep the Grok version`, disabled: Boolean(busy), onClick: () => onResolve(h.item, 'grok'), variant: 'ghost' }, 'Keep the Grok version')
+              )
+          )
+        )
+      )
+    )
+  const stopped = preview.blocked || (preview.pending ? 'The last change is still waiting for the Mirror\'s next run.' : '')
+
+  return el(
+    'section',
+    { 'aria-labelledby': 'gbt-tg-preview', className: 'flex flex-col gap-2' },
+    el('h3', { className: HEADING, id: 'gbt-tg-preview' }, 'What would change in Grok'),
+    preview.sentence && el('p', { className: BODY }, preview.sentence),
+    preview.pending &&
+      el(
+        'div',
+        { className: cn(NOTE, 'flex flex-wrap items-center gap-2') },
+        el('span', { className: 'min-w-0 flex-1' }, "Waiting for the Mirror's next run."),
+        el(Button, { disabled: Boolean(busy), loading: busy === 'give-up', onClick: onGiveUp, variant: 'secondary' }, 'Stop waiting')
+      ),
+    !preview.nothing && el('ul', { className: 'flex flex-col gap-1.5' }, preview.changes.map((c, i) => jsx(ToGrokChange, { change: c }, `${c.item}-${i}`))),
+    why('Not sent', preview.held),
+    why('Not allowed for this twin', preview.off),
+    !preview.nothing &&
+      preview.changeId &&
+      el(
+        'div',
+        { className: 'flex flex-col gap-1' },
+        el(
+          'div',
+          {},
+          el(Button, { 'aria-describedby': stopped ? 'gbt-tg-blocked' : undefined, disabled: Boolean(busy) || Boolean(stopped), loading: busy === 'apply', onClick: () => onApply(preview.changeId) }, 'Make these changes in Grok')
+        ),
+        stopped && el('p', { className: SMALL, id: 'gbt-tg-blocked' }, stopped)
+      )
+  )
+}
+
+function ToGrokSetUp({ info, initialSteps = false }) {
+  if (!info.grant && !info.mirrorSteps) {
+    return null
+  }
+
+  return el(
+    'section',
+    { 'aria-labelledby': 'gbt-tg-setup', className: cn(BOX) },
+    el('h3', { className: HEADING, id: 'gbt-tg-setup' }, 'Grok needs this once'),
+    el('p', { className: BODY }, info.permission === 'no_permission' ? 'Grok did not allow the last change. Add this rule in Grok, then make the changes again.' : 'Add this rule in Grok so the Mirror may make these changes for you.'),
+    info.grant &&
+      el(
+        'div',
+        { className: 'flex flex-col gap-1' },
+        el('pre', { 'aria-label': 'The rule to add in Grok', className: cn(PRE, 'max-h-32'), role: 'group', tabIndex: 0 }, info.grant.rule),
+        el('div', {}, jsx(CopyButton, { appearance: 'button', buttonVariant: 'secondary', label: 'Copy the rule', showLabel: true, text: info.grant.rule })),
+        info.grant.where && el('p', { className: SMALL }, `Where: ${info.grant.where}`)
+      ),
+    info.mirrorSteps &&
+      el(
+        Fold,
+        { initialOpen: initialSteps, label: "Steps for the Mirror's chat" },
+        el('pre', { 'aria-label': "Steps for the Mirror's chat", className: cn(PRE, 'max-h-48'), role: 'group', tabIndex: 0 }, info.mirrorSteps),
+        el('div', {}, jsx(CopyButton, { appearance: 'button', buttonVariant: 'secondary', label: 'Copy the steps', showLabel: true, text: info.mirrorSteps }))
+      )
+  )
+}
+
+const TO_GROK_STATE = { done: 'Done', failed: 'Did not go through', sent: "Waiting for the Mirror's next run" }
+
+function ToGrokHistory({ changes, busy, onUndo }) {
+  if (changes.length === 0) {
+    return null
+  }
+
+  return el(
+    'section',
+    { 'aria-labelledby': 'gbt-tg-history', className: 'flex flex-col gap-1.5' },
+    el('h3', { className: HEADING, id: 'gbt-tg-history' }, 'Changes made in Grok'),
+    el(
+      'ul',
+      { className: 'flex flex-col gap-1.5' },
+      [...changes].reverse().map(c => {
+        const what = c.kind === 'move' ? 'Routines moved' : c.undoOf ? `Put back: ${joinWords(c.items)}` : joinWords(c.items) || 'A change'
+        const when = ago(c.at)
+
+        return el(
+          'li',
+          { className: 'flex flex-col gap-0.5 border-t border-(--ui-stroke-tertiary) pt-1.5', key: c.id },
+          el(
+            'div',
+            { className: 'flex flex-wrap items-center gap-x-2 gap-y-1' },
+            el('span', { className: cn(BODY, 'min-w-0 flex-1 text-(--ui-text-primary)') }, what),
+            c.canUndo && el(Button, { 'aria-label': `Undo: ${what}`, disabled: Boolean(busy), onClick: () => onUndo(c), variant: 'secondary' }, 'Undo')
+          ),
+          el('span', { className: SMALL }, [when, c.undoneBy ? 'Put back later' : TO_GROK_STATE[c.state]].filter(Boolean).join(' · ')),
+          c.message && el('span', { className: SMALL }, c.message),
+          !c.canUndo && c.undoWhy && el('span', { className: SMALL }, c.undoWhy)
+        )
+      })
+    )
+  )
+}
+
+// The sheet. `initialInfo`: an INFO answer to show at once (else it is read when the sheet opens).
+function ToGrokSheet({ pair, open, onClose, initialInfo = null, initialTicked = null, initialSaid = '', initialProblem = null, initialRevoke = null, initialUndo = null, initialSteps = false }) {
+  const [raw, setRaw] = useState(initialInfo)
+  const [said, setSaid] = useState(initialSaid)
+  const [problem, setProblem] = useState(initialProblem)
+  const [revoke, setRevoke] = useState(initialRevoke)
+  const [ticked, setTicked] = useState(initialTicked)
+  const [undo, setUndo] = useState(initialUndo)
+  const [busy, setBusy] = useState(null)
+  const name = nameOf(pair)
+  const info = toGrokOf(raw)
+  const set = patch => {
+    if ('info' in patch) {
+      setRaw(patch.info)
+      setTicked(null)
+    }
+
+    if ('said' in patch) setSaid(patch.said)
+    if ('problem' in patch) setProblem(patch.problem)
+    if ('revoke' in patch) setRevoke(patch.revoke)
+  }
+  const acts = toGrokActs(pair.pair_id, set)
+  const run = async (what, fn) => {
+    if (busy) {
+      return
+    }
+
+    // where the keyboard was: it goes back there, or stays in the sheet when that button went with the act
+    const held = typeof document === 'undefined' ? null : document.activeElement
+    const home = held?.closest?.('[role="dialog"]') ?? null
+
+    setBusy(what)
+
+    try {
+      await fn()
+    } finally {
+      setBusy(null)
+
+      if (held && timers) {
+        timers.setTimeout(() => landFocus(held, home), 0)
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (open && !initialInfo) {
+      void run('read', acts.read)
+    }
+  }, [open])
+
+  // a change on its way: looked at again every 15 s until the Mirror has made it (or the owner stopped waiting)
+  const waiting = Boolean(info?.preview?.pending) || (info?.changes ?? []).some(c => c.state === 'sent')
+
+  useEffect(() => {
+    if (!open || !waiting || typeof timers?.setInterval !== 'function') {
+      return undefined
+    }
+
+    const stop = timers.setInterval(() => void acts.refresh(), 15_000)
+
+    return () => stop?.()
+  }, [open, waiting])
+
+  const allowed = info?.allowed ?? []
+  const ticks = ticked ?? allowed
+  const sameTicks = ticks.length === allowed.length && ticks.every(k => allowed.includes(k))
+  const tick = (key, on) => setTicked(on ? [...new Set([...ticks, key])] : ticks.filter(k => k !== key))
+
+  return el(
+    Sheet,
+    { description: 'Send changes you made in Hermes to the bot in Grok, after you see each one.', onClose, open, title: `${name}: changes to Grok`, wide: true },
+    el(
+      'div',
+      { className: 'flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1' },
+      !info && !problem && jsx(LinesSkeleton, {}),
+      info &&
+        el(
+          'fieldset',
+          { className: 'flex flex-col gap-1.5' },
+          el('legend', { className: HEADING }, 'What may change in Grok'),
+          allowed.length === 0 && el('p', { className: BODY }, TO_GROK_OFF),
+          el(
+            'div',
+            { className: 'flex flex-wrap items-center gap-x-4' },
+            TO_GROK_ITEMS.map(([key, label]) =>
+              el(
+                'label',
+                { className: cn('inline-flex min-h-7 cursor-pointer items-center gap-1.5', BODY), htmlFor: `gbt-tg-${key}`, key },
+                el('input', { checked: ticks.includes(key), disabled: Boolean(busy), id: `gbt-tg-${key}`, onChange: e => tick(key, e.target.checked), type: 'checkbox' }),
+                label
+              )
+            )
+          ),
+          el(
+            'div',
+            { className: 'flex flex-wrap items-center gap-2' },
+            el(Button, { disabled: Boolean(busy) || sameTicks, loading: busy === 'allow', onClick: () => void run('allow', () => acts.allow(ticks, allowed)), variant: allowed.length === 0 ? 'default' : 'secondary' }, 'Allow'),
+            allowed.length > 0 && el(Button, { disabled: Boolean(busy), loading: busy === 'stop', onClick: () => void run('stop', acts.stop), variant: 'ghost' }, 'Stop changes in Grok')
+          )
+        ),
+      revoke?.rule &&
+        el(
+          'section',
+          { 'aria-labelledby': 'gbt-tg-revoke', className: BOX },
+          el('h3', { className: HEADING, id: 'gbt-tg-revoke' }, 'Delete this rule in Grok'),
+          revoke.sentence && el('p', { className: BODY }, revoke.sentence),
+          el('pre', { 'aria-label': 'The rule to delete in Grok', className: cn(PRE, 'max-h-32'), role: 'group', tabIndex: 0 }, revoke.rule),
+          el('div', {}, jsx(CopyButton, { appearance: 'button', buttonVariant: 'secondary', label: 'Copy the rule', showLabel: true, text: revoke.rule })),
+          revoke.where && el('p', { className: SMALL }, `Where: ${revoke.where}`)
+        ),
+      info && allowed.length > 0 && info.permission !== 'ready' && jsx(ToGrokSetUp, { info, initialSteps }),
+      info?.preview && jsx(ToGrokPreview, { busy, onApply: id => void run('apply', () => acts.apply(id)), onGiveUp: () => void run('give-up', acts.giveUp), onResolve: (item, keep) => void run('resolve', () => acts.resolve(item, keep, raw)), onRetry: () => void run('read', acts.read), preview: info.preview }),
+      problem && jsx(InlineProblem, { error: problem, onRetry: info ? undefined : () => void run('read', acts.read) }),
+      info && jsx(ToGrokHistory, { busy, changes: info.changes, onUndo: setUndo }),
+      el('p', { className: said ? cn(BODY, 'text-(--ui-text-primary)') : 'sr-only', role: 'status' }, said)
+    ),
+    undo &&
+      jsx(Confirm, {
+        busyLabel: 'Putting back…',
+        cancelLabel: 'Keep it',
+        confirmLabel: 'Put back',
+        description: `${joinWords(undo.items) || 'What this change sent'} in Grok go${undo.items.length === 1 ? 'es' : ''} back to what ${undo.items.length === 1 ? 'it was' : 'they were'} before this change${ago(undo.at) ? ` (${ago(undo.at)})` : ''}.`,
+        onClose: () => setUndo(null),
+        onConfirm: () => run('undo', () => acts.undo(undo.id)),
+        open: true,
+        title: 'Undo this change in Grok?'
+      })
+  )
+}
+
+function CopiesPanel({ pair, open, intervalS, fastCheck, onSkillSync, onToGrok, onShow, onFinish, initialTechnical = false, initialTable = false, initialSyncs = false }) {
   const [busy, run] = useBusy()
   const g2h = coverageGroups(pair?.coverage, 'g2h')
   const h2g = coverageGroups(pair?.coverage, 'h2g')
@@ -2886,6 +3461,15 @@ function CopiesPanel({ pair, open, intervalS, fastCheck, onSkillSync, onShow, on
     el(Fold, { initialOpen: initialTable, label: 'The whole table' }, jsx(WholeTable, {})),
     // (which way each of this twin's things goes, the owner's choice: folded too, and only on a backend that knows it)
     jsx(SyncsFold, { initialOpen: initialSyncs, onMirror: onSkillSync, pair }),
+    // (the owner's own changes back to Grok: off until allowed, and always after a preview)
+    onToGrok &&
+      !isSample(pair) &&
+      el(
+        'div',
+        { className: 'flex flex-col gap-1' },
+        el('p', { className: SMALL, id: 'gbt-to-grok-why' }, 'Name, description, instructions and routines you change in Hermes can go to Grok, after you see each change.'),
+        el(Button, { 'aria-describedby': 'gbt-to-grok-why', className: 'self-start', onClick: onToGrok, variant: 'secondary' }, 'Changes to Grok…')
+      ),
     jsx(SameOrNot, {
       initialOpen: initialTechnical,
       more: [back.length > 0 ? `Back to Grok: ${joinWords(back)} you change in Hermes go to Grok when you send them. Everything else you change in Grok yourself.` : 'Back to Grok: nothing goes by itself.'],
@@ -3103,7 +3687,7 @@ function VersionsPanel({ pair, open }) {
 const DETAIL_TABS = ['copies', 'versions', 'recent']
 
 // `initialTab` lets the smoke test render each section directly; `initialTechnical` opens the fold of the first one.
-function DetailsSheet({ pair, open, onClose, intervalS, fastCheck, checkedAt = null, onSkillSync, onShow, onFinish, initialTab = 'copies', initialTechnical = false, initialTable = false }) {
+function DetailsSheet({ pair, open, onClose, intervalS, fastCheck, checkedAt = null, onSkillSync, onToGrok, onShow, onFinish, initialTab = 'copies', initialTechnical = false, initialTable = false }) {
   const [tab, setTab] = useState(DETAIL_TABS.includes(initialTab) ? initialTab : 'copies')
   // The number on the tab is the number of versions its list shows (the same answer the list is drawn from:
   // one request, shared). The count in the status may include versions that hold nothing, which are not listed.
@@ -3137,7 +3721,7 @@ function DetailsSheet({ pair, open, onClose, intervalS, fastCheck, checkedAt = n
     el(
       'div',
       { className: 'max-h-[55vh] min-h-48 overflow-y-auto pr-1' },
-      tab === 'copies' && jsx(CopiesPanel, { fastCheck, initialTable, initialTechnical, intervalS, onFinish, onShow, onSkillSync, open, pair }),
+      tab === 'copies' && jsx(CopiesPanel, { fastCheck, initialTable, initialTechnical, intervalS, onFinish, onShow, onSkillSync, onToGrok, open, pair }),
       tab === 'versions' && jsx(VersionsPanel, { open, pair }),
       tab === 'recent' && jsx(RecentPanel, { open, pair })
     )
@@ -5222,6 +5806,7 @@ function TwinRow({ pair, storage, lastCheckAt, intervalS, fastCheck, held: pageH
           }
         },
         onSkillSync: () => setSheet('sync'),
+        onToGrok: () => setSheet('to-grok'),
         open: true,
         pair
       }),
@@ -5229,6 +5814,7 @@ function TwinRow({ pair, storage, lastCheckAt, intervalS, fastCheck, held: pageH
     sheet === 'finish' && jsx(FinishSheet, { example, onClose: close, onImport: () => setSheet('import'), open: true, pair, storage }),
     sheet === 'import' && !sample && jsx(ImportSheet, { onClose: close, onMove: () => setSheet('move'), open: true, pair }),
     sheet === 'sync' && jsx(SkillSyncSheet, { onClose: close, open: true, pair, storage }),
+    sheet === 'to-grok' && !sample && jsx(ToGrokSheet, { onClose: close, open: true, pair }),
     sheet === 'move' && jsx(MoveSheet, { onClose: close, onShow: close, open: true, pair, storage }),
     sheet === 'stop' && !sample && jsx(StopTwinningDialog, { onClose: close, onStopped, open: true, pair, storage })
   )

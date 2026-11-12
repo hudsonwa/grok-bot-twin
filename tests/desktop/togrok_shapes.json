@@ -1,0 +1,19 @@
+{
+  "note": "Shape of the answers about a twin's changes from Hermes to Grok (GET /pairs/{pid}/to-grok and the POSTs under it), written from the to-grok routes in dashboard/plugin_api.py. tests/desktop/togrok.mjs checks its invented answers against it.",
+  "shapes": {
+    "Grant": {"required": {"items": "list[str]", "at": "str", "rule": "str", "where": "str"}, "closed": true},
+    "Revoke": {"required": {"rule": "str", "where": "str", "sentence": "str", "forgot": "int"}, "closed": true},
+    "InGrok": {"required": {"allow_rule": "str", "where": "str", "mirror_steps": "str"}, "closed": true},
+    "Change": {"required": {"id": "str", "at": "str", "state": "str", "items": "list[str]", "undo_of": "str|null", "undone_by": "str|null", "message": "str", "can_undo": "bool", "kind": "str"}, "optional": {"undo_why": "str"}, "closed": true, "note": "state: sent | done | failed; kind: change | move; undo_why when can_undo is false"},
+    "Routine": {"required": {"name": "str", "schedule": "str", "enabled": "bool|null", "prompt": "str"}, "optional": {"schedule_words": "str"}, "closed": true},
+    "PreviewChange": {"required": {"item": "str", "before": "str|null|Routine", "after": "str|null|Routine"}, "optional": {"diff": "list[str]", "note": "str", "grok_unknown": "bool"}, "closed": true, "note": "item: name | description | instructions | routine:<key>; text in full, never cut"},
+    "Held": {"required": {"item": "str", "code": "str", "why": "str"}, "closed": true, "note": "code: conflict | secret | empty | both_on"},
+    "Off": {"required": {"item": "str", "why": "str"}, "closed": true},
+    "Preview": {"required": {"change_id": "str", "nothing": "bool", "sentence": "str", "permission": "str", "changes": "list[PreviewChange]", "held": "list[Held]", "off": "list[Off]"}, "optional": {"blocked": "str", "pending": "str|null"}, "closed": true},
+    "PreviewError": {"required": {"error": "ErrorBody"}, "closed": true},
+    "Info": {"route": "GET /pairs/{pid}/to-grok; POST .../allow, .../disallow", "required": {"pair_id": "str", "allowed": "list[str]", "bot_known": "bool", "writer": "str", "permission": "str", "grant": "Grant|null", "runner": "RunnerMap", "changes": "list[Change]"}, "optional": {"revoke": "Revoke", "in_grok": "InGrok", "preview": "Preview|PreviewError"}, "closed": true, "note": "writer: mirror | fake | none; permission: ready | not_set_up | no_permission; preview only when allowed"},
+    "RunnerMap": {"required": {}, "closed": false},
+    "Result": {"route": "POST .../apply, .../undo, .../runner", "required": {"state": "str", "change_id": "str", "items": "list[str]", "message": "str", "sentence": "str"}, "optional": {"runner": "RunnerMap", "not_undone": "list[str]"}, "closed": true},
+    "GiveUp": {"route": "POST .../give-up", "required": {"state": "str", "sentence": "str"}, "closed": true}
+  }
+}

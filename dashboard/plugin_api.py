@@ -1028,33 +1028,46 @@ async def to_grok_get(pid: str) -> Any:
     return await _call(svc.to_grok_info, _pid(pid))
 
 
+_H2G_STATUS = {"refused": 403, "not_allowed": 403, "no_permission": 403, "no_bot": 409, "stale": 409,
+               "pending": 409, "changed_in_grok": 409, "undone": 409, "is_move": 409, "empty": 409, "no_change": 404,
+               "not_found": 404, "internal": 500}
+
+
+async def _h2g_call(fn: Callable[..., Any], *args: Any) -> Any:
+    """A Hermes -> Grok change: an error is an HTTP 4xx (or 500) with {"detail": {"code", "message", "hint"?}}."""
+    out = await _call(fn, *args)
+    if isinstance(out, dict) and set(out) == {"error"} and isinstance(out["error"], dict):
+        raise HTTPException(status_code=_H2G_STATUS.get(out["error"].get("code"), 400), detail=out["error"])
+    return out
+
+
 @router.post("/pairs/{pid}/to-grok/{action}")
 async def to_grok_post(pid: str, action: str, body: Any = Body(None)) -> Any:
     """allow / disallow {"items": [..] | "all"}; apply / undo {"change_id": "c-…"};
     resolve {"item": "name"|"description"|"instructions", "keep": "hermes"|"grok"}; runner {"routine": key, "to": "grok"|"hermes"};
     give-up {} (stop waiting for the Mirror's answer). Every change refuses inside a request from another computer
-    (tasks.asked_turn) and while the Hermes to Grok beta is off; the beta itself is turned on only in the owner's
-    own terminal (no route here)."""
+    (tasks.asked_turn); nothing is sent for a twin the owner never allowed, and apply / undo take only the exact
+    change id the owner saw (a stale one is refused). Disallow (which only takes changes back) is always accepted."""
     b = _body(body)
     p = _pid(pid)
     svc = await asyncio.to_thread(_svc)
     if action == "allow":  # the page's own route: never a request from another computer (tasks.asked_turn)
-        return await _call(svc.to_grok_allow, p, _h2g_items(b), True)
+        return await _h2g_call(svc.to_grok_allow, p, _h2g_items(b), True)
     if action == "disallow":
-        return await _call(svc.to_grok_disallow, p, _h2g_items(b))
+        return await _h2g_call(svc.to_grok_disallow, p, _h2g_items(b))
     if action in ("apply", "undo"):
         if not isinstance(b.get("change_id"), str) or not _H2G_CHANGE_RE.match(b["change_id"]):
             raise _h2g_bad()
-        return await _call(getattr(svc, f"to_grok_{action}"), p, b["change_id"], True)
+        return await _h2g_call(getattr(svc, f"to_grok_{action}"), p, b["change_id"], True)
     if action == "resolve":
         if b.get("item") not in _H2G_ITEMS[:3] or b.get("keep") not in ("hermes", "grok"):
             raise _h2g_bad()
-        return await _call(svc.to_grok_resolve, p, b["item"], b["keep"], True)
+        return await _h2g_call(svc.to_grok_resolve, p, b["item"], b["keep"], True)
     if action == "runner":
         if not isinstance(b.get("routine"), str) or not _H2G_RKEY_RE.match(b["routine"]) or \
                 b.get("to") not in ("grok", "hermes"):
             raise _h2g_bad()
-        return await _call(svc.to_grok_runner, p, b["routine"], b["to"], True)
+        return await _h2g_call(svc.to_grok_runner, p, b["routine"], b["to"], True)
     if action == "give-up":
-        return await _call(svc.to_grok_give_up, p, True)
+        return await _h2g_call(svc.to_grok_give_up, p, True)
     raise HTTPException(status_code=404, detail={"code": "not_found", "message": "That request was not understood."})

@@ -2078,7 +2078,7 @@ if (!haveReact) {
         'Grok memory Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory facts, which need skill sync.',
         'Conversations Off until you switch full transcripts on for a twin.',
         "Grok model setting Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in Hermes.",
-        'Name, description and instructions You make the same change in Grok yourself.', "Instructions By itself, as one of the twin's settings. You can switch that off on each computer.", 'Chats, files and logins Not copied. A request you send to another computer and its answer are the only chat text that travels, and only with requests switched on.']) {
+        'Name, description and instructions Off for every twin until you allow it. Then, with skill sync set up, you see a preview of each change and apply it. A bot in your own Grok account makes it there, and you can undo it. Otherwise you make the same change in Grok yourself.', "Instructions By itself, as one of the twin's settings. You can switch that off on each computer.", 'Chats, files and logins Not copied. A request you send to another computer and its answer are the only chat text that travels, and only with requests switched on.']) {
         ok(open.includes(s), `the whole table says "${s}"`)
       }
       // A row that waits for work not in this version says so in its own sentence, and is marked for whoever checks.
