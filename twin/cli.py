@@ -85,6 +85,8 @@ Advanced
   send-to-grok [TWIN]    send approved skill changes to Grok (needs skill sync)
   skill-sync [TWIN]      skill sync (optional): --folder DIR turns it on, --off turns it off, --status: last run
   digest [TWIN]          the optional activity digest to Grok: preview, --on, --off
+  transcripts ACTION [TWIN]  whole conversations kept here, encrypted, searchable by the twin (off by
+                         default). ACTION: on, off, add-grok, refresh, search, export, to-hermes, forget
   facts [TWIN]           memory facts shared with Grok: sync, keep CONFLICT hermes|grok, restore POINT
   briefs [TWIN]          session briefs to and from Grok, off until you choose: --way to-grok|from-grok|both|off
   to-grok [TWIN]         changes made in Hermes, made in Grok by your Mirror bot: preview, then
@@ -1896,6 +1898,10 @@ from .fleet_server import one_shot as _one_shot  # noqa: E402  (a short command 
 
 HANDLERS.update(_fleet_cli.HANDLERS)
 
+from . import transcripts_cli as _transcripts_cli  # noqa: E402  (transcripts)
+
+HANDLERS.update(_transcripts_cli.HANDLERS)
+
 from . import tasks_api as _tasks_cli  # noqa: E402  (ask, requests)
 
 HANDLERS.update(_tasks_cli.HANDLERS)
@@ -2068,6 +2074,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     subs.add_parser("doctor", help="Check the setup and say what to fix")
     _fleet_cli.setup(subs)
     _tasks_cli.setup(subs)
+    _transcripts_cli.setup(subs)
     _routines_cli.setup(subs)
     _instr_cli.setup(subs)
     _h2g_cli.setup(subs)

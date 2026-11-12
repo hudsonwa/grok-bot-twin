@@ -91,8 +91,8 @@ def test_box_round_trip_and_unreadable_bytes():
 
 @pytest.mark.parametrize("change", ["layer", "way", "machine", "bind", "link", "tamper", "nonce", "shape"])
 def test_box_refuses_anything_not_made_for_this_use(change):
-    box = ml.seal(LINK, "facts", "ask", MID, "bind-1", NOTE)
-    args = dict(link=LINK, layer="facts", way="ask", machine=MID, bind="bind-1")
+    box = ml.seal(LINK, "transcripts", "ask", MID, "bind-1", NOTE)
+    args = dict(link=LINK, layer="transcripts", way="ask", machine=MID, bind="bind-1")
     if change == "layer":
         args["layer"] = "briefs"
     elif change == "way":
@@ -117,7 +117,7 @@ def test_box_refuses_anything_not_made_for_this_use(change):
 def test_layer_keys_differ_and_differ_from_02_memory():
     from hermes_plugins.grok_bot_twin.twin import xs_memory
     keys = {ml.layer_key(LINK, layer) for layer in ml.LAYERS}
-    assert len(keys) == 2
+    assert len(keys) == 3
     box = ml.seal(LINK, "facts", "ask", MID, "b", NOTE)
     assert xs_memory.unseal(LINK, "ask", MID, "b", box) is None  # a layer box is not a 0.2 memory box
     with pytest.raises(ValueError):
@@ -125,7 +125,11 @@ def test_layer_keys_differ_and_differ_from_02_memory():
 
 
 # ---- privacy helpers ---------------------------------------------------------------------------------------------------
-def test_privacy_helpers():
+def test_mask_secrets_for_local_archives():
+    text = "Hello.\nThe wifi password is " + "trail" + "4821x\nkey: " + fake_key() + "\nBye."
+    out = ml.mask_secrets(text)
+    assert "4821" not in out and fake_key() not in out
+    assert out.startswith("Hello.\n") and out.endswith("\nBye.")
     assert ml.held("Prefers short answers.") is None
     assert ml.held_words({"secret": 1, "order": 2}) == [
         "2 items: reads like an instruction, not a note", "1 item: looks like it holds a password or key"]

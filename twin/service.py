@@ -1940,6 +1940,11 @@ class TwinService(ConnectMixin, FinishMixin, SetupExportMixin, BatchMixin, Fleet
                     _briefs.forget(pid)
                 except Exception:
                     log.warning("grok-bot-twin: could not delete a removed twin's session briefs", exc_info=True)
+                try:  # and its full transcripts (the archive's rows, exports and import files of this twin)
+                    from . import transcripts as _transcripts
+                    _transcripts.forget(pid)
+                except Exception:
+                    log.warning("grok-bot-twin: could not delete a removed twin's full transcripts", exc_info=True)
                 # the fresh status may have lost the Hermes side (botport let go first): the registry still knows it
                 was = entry.get("hermes") if isinstance(entry, dict) else None
                 prof = (st.get("hermes") or {}).get("profile") or (was.get("profile") if isinstance(was, dict) else None)

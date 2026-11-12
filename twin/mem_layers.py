@@ -1,17 +1,20 @@
 """Memory layers between a Grok bot and its Hermes twin: what they share, which way, and how it is kept private.
 
-Two layers, each switched per twin and OFF until the owner switches it on:
+Three layers, each switched per twin and OFF until the owner switches it on:
 - "facts" (`mem_facts.py`): the twin's MEMORY.md / USER.md notes and the Grok bot's memories, one fact per entry,
   each with an id, where it came from and when. Merged both ways; conflicts shown; deletions honoured both ways.
 - "briefs" (`mem_briefs.py`): each conversation compacted into a short Markdown brief (who, what was decided, open
   threads), passed both ways so "carry on over there" works without the whole conversation.
+- "transcripts" (`mem_archive.py`): whole conversations kept in a local SQLite archive with full-text search and a
+  JSON export that Hermes can import as its own sessions. They are never sent to Grok unless the owner switches
+  that direction on for that twin.
 
 Directions: "off", "grok_to_hermes", "hermes_to_grok", "both". Everything here starts "off".
 
 Privacy filter (`held`, `mask`): the 0.2 memory check (`xs_memory.why_held`): a note that looks like it holds a
 password, key, code or card number, reads like an instruction to the model, looks like one of this plugin's own
 notes, holds characters nobody can see, or is too long to check, never crosses: it stays on the side it was written
-on and is counted, never quoted. Briefs are filtered line by line.
+on and is counted, never quoted. Briefs and transcripts are filtered line by line.
 
 Between the owner's computers: the sealed box of the 0.2 memory sync (`xs_memory.seal` / `unseal`: SHAKE-256 keyed
 stream + HMAC-SHA256, encrypt then authenticate) with a key of its own per layer, made from the link's key.
@@ -39,7 +42,7 @@ from . import store, xs_memory
 from .engine import EngineError
 from .model import now_iso
 
-LAYERS = ("facts", "briefs")
+LAYERS = ("facts", "briefs", "transcripts")
 DIRECTIONS = ("off", "grok_to_hermes", "hermes_to_grok", "both")
 SETTINGS_FILE = "mem-layers.json"
 STUB_DIR = "mem-grok-stub"
@@ -51,6 +54,8 @@ SENTENCES = {
              "A note that looks like a password, key or instruction never crosses.",
     "briefs": "Briefs: each conversation summed up in a few lines (who, what was decided, what is still open), so "
               "you can carry on on the other side. Not the whole conversation.",
+    "transcripts": "Transcripts: whole conversations kept on this computer in a searchable archive you can export "
+                   "or open in Hermes. Sent to Grok only if you switch that direction on.",
 }
 WAY_WORDS = {"off": "off", "grok_to_hermes": "Grok → Hermes", "hermes_to_grok": "Hermes → Grok", "both": "both ways"}
 HELD_WORDS = dict(xs_memory.HELD_WORDS)
@@ -91,7 +96,7 @@ def _load() -> dict:
 
 
 def settings(profile: str) -> dict:
-    """{"facts": direction, "briefs": ..., "changed": iso or None}. Unknown twin: all off."""
+    """{"facts": direction, "briefs": ..., "transcripts": ..., "changed": iso or None}. Unknown twin: all off."""
     check_profile(profile)
     rec = _load()["twins"].get(profile)
     return dict(rec) if rec else {**{layer: "off" for layer in LAYERS}, "changed": None}
@@ -100,7 +105,7 @@ def settings(profile: str) -> dict:
 def set_direction(profile: str, layer: str, direction: str) -> dict:
     check_profile(profile)
     if layer not in LAYERS:
-        raise _bad("bad_layer", "That is not a memory layer.", "Use facts or briefs.")
+        raise _bad("bad_layer", "That is not a memory layer.", "Use facts, briefs or transcripts.")
     if direction not in DIRECTIONS:
         raise _bad("bad_direction", "That is not a direction.", "Use off, grok_to_hermes, hermes_to_grok or both.")
     with _guard:
@@ -114,7 +119,7 @@ def set_direction(profile: str, layer: str, direction: str) -> dict:
     return settings(profile)
 
 
-PANEL_KEYS = {"facts": "memory_facts", "briefs": "session_briefs"}
+PANEL_KEYS = {"facts": "memory_facts", "briefs": "session_briefs", "transcripts": "transcripts"}
 
 
 def _panel() -> Any:
@@ -192,6 +197,19 @@ def held_words(counts: dict) -> list:
     return [f"{n} {'item' if n == 1 else 'items'}: {HELD_WORDS.get(k, k)}" for k, n in sorted(counts.items()) if n]
 
 
+def mask_secrets(text: str) -> str:
+    """For a whole transcript kept on this computer: suspected keys masked where they are; a line that looks like
+    it states a password or code is replaced whole (its words are kept nowhere)."""
+    text = _secrets.redact(text, "[secret]")
+    out = []
+    for line in text.split("\n"):
+        if line.strip() and xs_memory._holds_secret(line):
+            out.append("[line held back: looks like it holds a password or key]")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 # ---- between the owner's computers: the 0.2 sealed box, one key per layer ---------------------------------------------
 def layer_key(link_key: bytes, layer: str) -> bytes:
     if layer not in LAYERS:
@@ -227,10 +245,16 @@ class GrokTransport(Protocol):
     def write_brief(self, brief: dict) -> bool:
         ...
 
+    def write_transcript(self, conversation: dict) -> bool:
+        ...
+
+    def read_transcripts(self) -> list:
+        """[{"id", "title", "started", "messages": [{"role", "content", "time"}]}] of the Grok bot's conversations."""
+
 
 class StubTransport:
-    """A pretend Grok bot in files (<plugin folder>/mem-grok-stub/<profile>/): `facts.json` and
-    `briefs.json` hold "what the Grok bot has"; every write is also put on `outbox.jsonl`, the list the
+    """A pretend Grok bot in files (<plugin folder>/mem-grok-stub/<profile>/): `facts.json`, `briefs.json`,
+    `transcripts.json` hold "what the Grok bot has"; every write is also put on `outbox.jsonl`, the list the
     Mirror will carry out once it can. Never a network call."""
 
     name = "stub"
@@ -281,6 +305,18 @@ class StubTransport:
         self._out("brief", {"id": brief.get("id")})
         return True
 
+    # transcripts
+    def read_transcripts(self) -> list:
+        return [c for c in self._get("transcripts.json") if isinstance(c, dict)]
+
+    def write_transcript(self, conversation: dict) -> bool:
+        items = [c for c in self._get("transcripts.json")
+                 if isinstance(c, dict) and c.get("id") != conversation.get("id")]
+        items.append(conversation)
+        self._put("transcripts.json", items[-200:])
+        self._out("transcript", {"id": conversation.get("id")})
+        return True
+
 
 _factory: Callable[[str], Any] = StubTransport
 
@@ -288,7 +324,10 @@ _factory: Callable[[str], Any] = StubTransport
 def set_transport_factory(factory: Optional[Callable[[str], Any]]) -> None:
     """The Mirror calls this with its own transport; None goes back to the stub."""
     global _factory
-    _factory = factory or StubTransport
+    if factory is not None and not callable(factory):
+        raise TypeError("transport factory must be callable")
+    with _guard:
+        _factory = factory or StubTransport
 
 
 def mirror_ready() -> bool:

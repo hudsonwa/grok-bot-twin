@@ -112,6 +112,10 @@ def register(ctx) -> None:
     ctx.register_tool(tasks_api.TOOL_NAME, tools.TOOLSET, tasks_api.TOOL_SCHEMA, tasks_api.twin_ask_machine,
                       description="Ask this twin's copy on another of your computers to do something there",
                       emoji="🪞")
+    ctx.register_tool("twin_transcripts_search", tools.TOOLSET, tools.TWIN_TRANSCRIPTS_SCHEMA,
+                      tools.twin_transcripts_search,
+                      description="Search this twin's kept conversations (only when full transcripts are on)",
+                      emoji="🪞")
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_end", _on_session_end)

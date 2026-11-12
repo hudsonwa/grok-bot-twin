@@ -47,7 +47,8 @@ _ROWS: tuple[tuple[str, str, str, str, Optional[str], Optional[str]], ...] = (
      "With skill sync, which is optional: a sync bot in your own Grok account carries them. Without it you copy "
      "them yourself.", None, None),
     ("grok-conversations", "grok", "Conversations",
-     "Does not copy: whole conversations stay in Grok. Copying them comes in a later version.", None, None),
+     "Off until you switch full transcripts on for a twin. Then conversations from a Grok export can become Hermes "
+     "chats of the twin; full transcripts are set up in the terminal.", None, None),
     ("grok-memory", "grok", "Grok memory",
      "Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory "
      "facts, which need skill sync.", None, None),

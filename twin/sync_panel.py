@@ -1,4 +1,4 @@
-"""What syncs between a Grok bot and its twin: one panel per twin, seven rows, a direction each.
+"""What syncs between a Grok bot and its twin: one panel per twin, eight rows, a direction each.
 
 The panel owns the owner's choice (which way each item goes); the parts of the plugin that move things own whether a
 direction can work at all and when it last ran. Each part plugs in with `provide(...)` and acts only on `wanted(...)`.
@@ -31,10 +31,11 @@ ITEMS: tuple[tuple[str, str], ...] = (
     ("routines", "Routines"),
     ("memory_facts", "Memory facts"),
     ("session_briefs", "Session briefs"),
+    ("transcripts", "Conversations (full)"),
 )
 KEYS = tuple(k for k, _ in ITEMS)
 LABELS = dict(ITEMS)
-PRIVATE = frozenset({"memory_facts", "session_briefs"})
+PRIVATE = frozenset({"memory_facts", "session_briefs", "transcripts"})
 DIRECTIONS = ("grok_to_hermes", "hermes_to_grok", "both", "off")
 ARROWS = {"grok_to_hermes": "Grok → Hermes", "hermes_to_grok": "Hermes → Grok", "both": "Both ways", "off": "Off"}
 CHOICE_STATES = ("ok", "needs_mirror", "not_yet")
@@ -54,11 +55,18 @@ MIRROR_SENTENCE = {
 # What each direction means, said once per item: what choosing it does (or would do).
 _NOUN = {"name": "the name", "description": "the description", "instructions": "the instructions",
          "skills": "skills", "routines": "routines", "memory_facts": "memory facts",
-         "session_briefs": "session briefs"}
+         "session_briefs": "session briefs", "transcripts": "whole conversations"}
 
 
 def _sentence(key: str, direction: str) -> str:
     n = _NOUN[key]
+    if key == "transcripts":
+        return {
+            "grok_to_hermes": "Whole conversations from Grok are kept on this computer, searchable; none go to Grok.",
+            "hermes_to_grok": "Whole conversations from Hermes would be sent to Grok; none come back.",
+            "both": "Whole conversations are kept on this computer and sent to Grok too.",
+            "off": "No conversation is copied either way.",
+        }[direction]
     if key in PRIVATE:
         return {
             "grok_to_hermes": f"{n[0].upper()}{n[1:]} from Grok reach this twin; none go back to Grok.",
@@ -165,6 +173,7 @@ def _defaults() -> dict:
         "routines": Provider(_fixed(("off",))),
         "memory_facts": Provider(_fixed(("off",))),
         "session_briefs": Provider(_fixed(("off",))),
+        "transcripts": Provider(_fixed(("off",))),
     }
 
 
@@ -338,7 +347,7 @@ def _twin(ctx: Ctx, f: dict) -> dict:
 
 
 def view(svc: Any) -> dict:
-    """GET /sync/panel: every twin on this computer, seven rows each. Reads local files only."""
+    """GET /sync/panel: every twin on this computer, eight rows each. Reads local files only."""
     ctxs = _contexts(svc)
     f = _read()
     if not ctxs:
@@ -395,7 +404,7 @@ def forget_twin(pair_id: str) -> None:
 
 # ---- the terminal -----------------------------------------------------------------------------------------------
 _ITEM_WORDS = {**{k: k for k in KEYS}, **{v.lower(): k for k, v in ITEMS}, "memory": "memory_facts",
-               "facts": "memory_facts", "briefs": "session_briefs",
+               "facts": "memory_facts", "briefs": "session_briefs", "conversations": "transcripts",
                "memory-facts": "memory_facts", "session-briefs": "session_briefs"}
 _DIR_WORDS = {**{d: d for d in DIRECTIONS}, "from-grok": "grok_to_hermes", "to-grok": "hermes_to_grok",
               "both-ways": "both"}

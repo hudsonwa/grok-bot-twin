@@ -260,7 +260,7 @@ routines, never a new routine.
 | Name and description | By itself, in seconds, while Hermes is open. |
 | Instructions, routines and connections | With Import setup export: the bot writes a file about itself when you ask it in Grok. Instructions are filled in, routines arrive switched off, and connections arrive as a list of names. Logins are never copied. With skill sync set up, instructions also follow Grok's every 15 minutes by themselves, unless you switch that off. When it is unsure which to keep, you are asked. |
 | Skills | With skill sync, which is optional: a sync bot in your own Grok account carries them. Without it you copy them yourself. |
-| Conversations | Does not copy: whole conversations stay in Grok. Copying them comes in a later version. |
+| Conversations | Off until you switch full transcripts on for a twin. Then conversations from a Grok export can become Hermes chats of the twin; full transcripts are set up in the terminal. |
 | Grok memory | Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory facts, which need skill sync. |
 | Grok model setting | Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in Hermes. |
 | **From Hermes back to Grok** | |
@@ -687,6 +687,28 @@ was is kept (`hermes twin facts "Test Scout" restore <point>`).
 password, key, code or card number, or reads like an instruction, stays where it was written; the panel counts
 them and never shows them. Both directions need the Mirror: until it is set up, the row says so and no fact
 moves.
+
+## A twin's whole conversations (archive and search)
+
+Off until you switch it on for a twin. Then the plugin keeps that twin's conversations on this computer, both sides:
+the Grok bot's (from a Grok export with conversations you hand over, or that the Mirror reads once it is set up) and
+the twin's own Hermes chats. They stay here, encrypted, and the twin can search them with its
+`twin_transcripts_search` tool ("what did we decide about the demo last week?"). Another twin cannot.
+
+```
+hermes twin transcripts on "Test Scout"                  # start keeping; `off` stops (what was kept stays)
+hermes twin transcripts add-grok "Test Scout" --file export.json
+hermes twin transcripts refresh "Test Scout"             # add the twin's Hermes chats so far (run again for newer ones)
+hermes twin transcripts search "Test Scout" -q "demo plan"
+hermes twin transcripts export "Test Scout" --file my-chats.json   # your own JSON copy, readable by you only
+hermes twin transcripts to-hermes "Test Scout"           # Grok conversations become Hermes chats ("From Grok: ...")
+hermes twin transcripts forget "Test Scout" --yes        # delete everything kept for that twin
+```
+
+What the Hermes twin said is never given to Grok unless you also switch that on (`to-grok-on`; off by default, off
+again whenever the archive goes off). The What syncs panel's "Conversations (full)" row is the same switch. The
+encryption protects copies of the archive (a backup, a synced folder); someone who can already read your files can
+read the key too. Details: docs/DISCLOSURE.md.
 
 ## Ask a twin on another computer
 

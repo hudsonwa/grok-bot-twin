@@ -1,4 +1,4 @@
-"""The "What syncs" panel: seven rows per twin, a direction each, honest about what
+"""The "What syncs" panel: eight rows per twin, a direction each, honest about what
 this version cannot do yet, and the way a backend part plugs in. Invented bots only, a throwaway HERMES_HOME, the
 fake botport helper."""
 from __future__ import annotations
@@ -20,7 +20,7 @@ from hermes_plugins.grok_bot_twin.twin.engine import EngineError  # noqa: E402
 
 FAKE = Path(__file__).resolve().parent / "fake_botport.py"
 fleet_testlib._SHAPES.update(json.loads((ROOT / "tests" / "desktop" / "syncs_shapes.json").read_text("utf-8"))["shapes"])
-KEYS = ["name", "description", "instructions", "skills", "routines", "memory_facts", "session_briefs"]
+KEYS = ["name", "description", "instructions", "skills", "routines", "memory_facts", "session_briefs", "transcripts"]
 
 
 @pytest.fixture(autouse=True)
@@ -83,12 +83,12 @@ def test_the_rows_say_what_this_version_does(bp):
     t = _twin(v)
     assert t["name"] == "Acme Support" and t["mirror"] == "not_set_up"
     assert [i["key"] for i in t["items"]] == KEYS
-    assert [i["label"] for i in t["items"]][-1] == "Session briefs"
+    assert [i["label"] for i in t["items"]][-1] == "Conversations (full)"
     for it in t["items"]:
         assert [c["direction"] for c in it["choices"]] == list(sp.DIRECTIONS)
         assert it["sentence"] and all(c["sentence"] for c in it["choices"])
         assert all(("why" in c) == (c["state"] != "ok") for c in it["choices"])
-        assert it["private"] is (it["key"] in ("memory_facts", "session_briefs"))
+        assert it["private"] is (it["key"] in ("memory_facts", "session_briefs", "transcripts"))
     # name: follows Grok; the way back needs the Mirror
     n = _item(t, "name")
     assert n["direction"] == "grok_to_hermes" and n["state"] == "needs_mirror"
@@ -102,11 +102,11 @@ def test_the_rows_say_what_this_version_does(bp):
     # skills without skill sync: off, and every way of syncing them needs the Mirror
     sk = _item(t, "skills")
     assert sk["direction"] == "off" and sk["state"] == "needs_mirror"
-    # routines and the two private rows: off, not in this version yet
-    for key in ("routines", "memory_facts", "session_briefs"):
+    # routines and the three private rows: off, not in this version yet
+    for key in ("routines", "memory_facts", "session_briefs", "transcripts"):
         it = _item(t, key)
         assert it["direction"] == "off" and it["state"] == "not_yet" and it["last_synced_at"] is None
-    assert "none go back to Grok" in _item(t, "session_briefs")["choices"][0]["sentence"]
+    assert "none go to Grok" in _item(t, "transcripts")["choices"][0]["sentence"]
 
 
 def test_a_direction_that_cannot_work_is_refused_and_nothing_is_saved(bp):
@@ -197,18 +197,19 @@ def test_the_terminal(bp):
     assert rc == 0 and err == "", err
     lines = out.splitlines()
     assert lines[0] == "What syncs for Acme Support"
-    for label in ("Name", "Description", "Instructions", "Skills", "Routines", "Memory facts", "Session briefs"):
+    for label in ("Name", "Description", "Instructions", "Skills", "Routines", "Memory facts", "Session briefs",
+                  "Conversations (full)"):
         assert any(line.startswith(f"  {label} ") for line in lines), label
     assert "Grok → Hermes" in out and "Not in this version yet" in out and "Needs the Mirror" in out
     assert "not synced yet" in out and "nothing private moves without your choice" in out
-    assert "  Routines        Off" in out
+    assert "  Routines              Off" in out
     name_off = _item(_twin(sp.view(bp)), "name")["choices"][3]["sentence"]
     assert name_off == "The name stays as it is on each side."
     rc, out, err = run(["syncs", "--json"])
     assert rc == 0 and fleet_testlib.shape_problems(json.loads(out), "SyncPanel") == []
     rc, out, err = run(["syncs", "memory", "from-grok"])
     assert rc == 1 and "Not in this version yet." in err
-    rc, out, err = run(["syncs", "Acme Support", "briefs", "off"])
+    rc, out, err = run(["syncs", "Acme Support", "conversations", "off"])
     assert rc == 0 and "Nothing changed" in out
     rc, out, err = run(["syncs", "Acme Support", "passwords", "off"])
     assert rc == 2 and "is not an item" in err
@@ -236,7 +237,7 @@ def test_the_local_routes(bp, monkeypatch):
     r = c.get(P + "/sync/panel")
     assert r.status_code == 200 and fleet_testlib.shape_problems(r.json(), "SyncPanel") == []
     pid = r.json()["twins"][0]["id"]
-    r = c.post(P + "/sync/panel", json={"twin": pid, "item": "routines", "direction": "both"})
+    r = c.post(P + "/sync/panel", json={"twin": pid, "item": "transcripts", "direction": "both"})
     assert r.status_code == 200 and r.json()["error"]["code"] == "not_available"
     r = c.post(P + "/sync/panel", json={"twin": pid, "item": "routines", "direction": "off"})
     assert r.status_code == 200 and fleet_testlib.shape_problems(r.json(), "SyncPanel") == []
@@ -255,3 +256,35 @@ def test_stop_twinning_deletes_the_twins_session_briefs(bp):
     assert len(br.stored(pid, "out")) == 1
     bp.remove(pid)
     assert br.stored(pid, "out") == [] and br._read_state()["twins"][pid]["to_grok"] is False
+
+
+def test_the_transcripts_row_shows_the_real_switch_whichever_way_they_disagree(bp):
+    from hermes_plugins.grok_bot_twin.twin import transcripts as tr
+    assert tr.plug_into_panel()
+    pid = _twin(sp.view(bp))["id"]
+    # the panel said Off, then the terminal switched the archive on: the row says so, and Off really switches it off
+    sp.choose(bp, pid, "transcripts", "off")
+    tr.switch(pid, True)
+    assert _item(_twin(sp.view(bp)), "transcripts")["direction"] == "grok_to_hermes"
+    said = sp.choose(bp, pid, "transcripts", "off")["said"]["sentence"]
+    assert "Nothing changed" not in said and tr.view(pid)["on"] is False
+    # the panel switched it on, then the terminal switched it off: the row says Off, and choosing it again works
+    sp.choose(bp, pid, "transcripts", "grok_to_hermes")
+    assert tr.view(pid)["on"] is True
+    tr.switch(pid, False)
+    assert _item(_twin(sp.view(bp)), "transcripts")["direction"] == "off"
+    said = sp.choose(bp, pid, "transcripts", "grok_to_hermes")["said"]["sentence"]
+    assert "Nothing changed" not in said and tr.view(pid)["on"] is True
+    assert "Nothing changed" in sp.choose(bp, pid, "transcripts", "grok_to_hermes")["said"]["sentence"]
+
+
+def test_stop_twinning_deletes_the_twins_full_transcripts(bp):
+    from hermes_plugins.grok_bot_twin.twin import transcripts as tr
+    pid = _twin(sp.view(bp))["id"]
+    tr.switch(pid, True)
+    tr.ingest_grok(pid, {"conversations": [{"id": "g1", "title": "Soup", "messages": [
+        {"role": "user", "text": "soupnight on Friday?"}]}]})
+    assert tr.view(pid)["conversations"]["grok"] == 1
+    bp.remove(pid)
+    v = tr.view(pid)
+    assert v["on"] is False and v["conversations"]["grok"] == 0 and pid not in tr._settings()["twins"]

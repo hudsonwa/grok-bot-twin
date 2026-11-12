@@ -244,6 +244,21 @@ def test_reads_finished_chats_only_and_never_writes_the_database(home, tmp_path)
     assert file_digest(bot / "state.db") == before and sorted(os.listdir(bot)) == names
 
 
+def test_a_grok_conversation_made_into_a_hermes_chat_is_never_briefed_back_to_grok(home, tmp_path):
+    from hermes_plugins.grok_bot_twin.twin import transcripts as tr
+    bot = tmp_path / "bot"
+    con = make_db(bot)
+    add_chat(con, "own", PLAN_CHAT, start=T0)
+    add_chat(con, "20000102_000000_abcd", PLAN_CHAT, start=T0 + 60)              # imported, renamed by the owner since
+    add_chat(con, "titled", PLAN_CHAT, start=T0 + 120, title=tr.IMPORT_TITLE + "Soup plans")
+    con.close()
+    tr.switch("test-scout", True)
+    st = tr._settings()
+    st["twins"]["test-scout"]["imported"]["c-0123456789abcdef"] = "20000102_000000_abcd"
+    tr._save_settings(st)
+    assert [c.key for c in br.hermes_conversations(bot, now=NOW)] == ["own"]
+
+
 def test_a_compressed_chain_is_one_conversation(home, tmp_path):
     bot = tmp_path / "bot"
     con = make_db(bot)

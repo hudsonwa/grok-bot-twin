@@ -2076,7 +2076,7 @@ if (!haveReact) {
       ok(count(openRaw, '<table') === 1 && count(openRaw, '<tbody') === 3 && openRaw.includes('<caption class="sr-only">What copies over, and how</caption>') && count(openRaw, 'scope="row"') === 16 && count(openRaw, 'scope="colgroup"') === 3 && count(openRaw, 'scope="col"') === 2, `the whole table: one table, three headed parts, sixteen named rows (${count(openRaw, 'scope="row"')})`)
       for (const s of ['From Grok to Hermes', 'From Hermes back to Grok', 'Between your own computers', 'Name and description By itself, in seconds, while Hermes is open.', 'Skills With skill sync, which is optional: a sync bot in your own Grok account carries them. Without it you copy them yourself.',
         'Grok memory Does not copy: memory is the most private thing a bot holds, so none is taken unless you switch on memory facts, which need skill sync.',
-        'Conversations Does not copy: whole conversations stay in Grok. Copying them comes in a later version.',
+        'Conversations Off until you switch full transcripts on for a twin.',
         "Grok model setting Does not copy: nothing Hermes reads from Grok names the bot's model, so the twin uses the model you choose in Hermes.",
         'Name, description and instructions You make the same change in Grok yourself.', "Instructions By itself, as one of the twin's settings. You can switch that off on each computer.", 'Chats, files and logins Not copied. A request you send to another computer and its answer are the only chat text that travels, and only with requests switched on.']) {
         ok(open.includes(s), `the whole table says "${s}"`)

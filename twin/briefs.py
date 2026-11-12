@@ -553,6 +553,8 @@ def hermes_conversations(home: Path, now: Optional[float] = None, since: float =
         if "display_kind" in mcols:  # Hermes' own notices kept as messages (process output, skill text)
             summary += ("AND (display_kind IS NULL OR display_kind NOT IN ('process_complete', "
                         "'async_delegation_complete', 'skill_invocation', 'tool_progress', 'system_notice')) ")
+        from . import transcripts as _transcripts
+        from_grok = _transcripts.imported_sessions()
         for r in rows:
             top = root(r)
             if top["id"] in done:
@@ -560,6 +562,8 @@ def hermes_conversations(home: Path, now: Optional[float] = None, since: float =
             done.add(top["id"])
             if top.get("hidden"):
                 continue
+            if top["id"] in from_grok or str(top.get("title") or "").startswith(_transcripts.IMPORT_TITLE):
+                continue  # a Grok conversation made into a Hermes chat (transcripts to-hermes): never briefed back
             ids = chain(top["id"])
             parts = [by_id[i] for i in ids if i in by_id]
             if not all(local_source(p.get("source")) for p in parts):

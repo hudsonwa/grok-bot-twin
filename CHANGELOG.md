@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1 (12 November 2026)
+
+- Full transcripts (off for every twin until you switch them on): the archive
+  of whole conversations, from Hermes chats and from a Grok export you hand
+  over, kept on this computer. The text is encrypted at rest with a key kept
+  apart from the archive. The twin's own tool searches only that twin's
+  conversations, and never inside a request from another computer. Sending
+  to Grok is a second switch, off by default, needs the Mirror, offers only
+  chats held on this computer, and masks passwords and keys first. Stop
+  twinning or `hermes twin transcripts forget --yes` deletes what was kept.
+  See docs/DISCLOSURE.md for exactly what is kept and what it does not
+  protect against.
+
+### Moves to 0.3.2
+
+- Hermes to Grok out of beta.
+
 ## 0.3.0 (12 November 2026)
 
 More than skills now syncs between a twin and its Grok bot.
@@ -23,7 +40,7 @@ More than skills now syncs between a twin and its Grok bot.
   routines go from Hermes to the Grok bot through the Mirror, after you look
   at a preview and apply it.
 
-### Moves to 0.3.1
+### Moved to a later release
 
-- Full transcripts (the archive of whole conversations).
-- Hermes to Grok out of beta.
+- Full transcripts (the archive of whole conversations): in 0.3.1.
+- Hermes to Grok out of beta: moves to 0.3.2.

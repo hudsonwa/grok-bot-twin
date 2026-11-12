@@ -947,7 +947,7 @@ def _sync_panel() -> Any:
 
 @router.get("/sync/panel")
 async def sync_panel_get() -> Any:
-    """Every twin on this computer: its seven rows, which way each goes, when it last synced. Local files only."""
+    """Every twin on this computer: its eight rows, which way each goes, when it last synced. Local files only."""
     svc = await asyncio.to_thread(_svc)
     return await _call(_sync_panel().view, svc)
 

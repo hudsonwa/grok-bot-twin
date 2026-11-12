@@ -1,4 +1,4 @@
-// What syncs: the Twins page's panel of a twin's seven things and which way each goes, outside Hermes Desktop.
+// What syncs: the Twins page's panel of a twin's eight things and which way each goes, outside Hermes Desktop.
 //
 //   node tests/desktop/syncs.mjs [--modules DIR]
 //
@@ -213,8 +213,8 @@ function fits(value, type, path) {
 // ── 3. fixtures (invented) ──────────────────────────────────────────────────
 
 const SCHEMA = 'grok-bot-twin.syncpanel.v1'
-const LABELS = ['Name', 'Description', 'Instructions', 'Skills', 'Routines', 'Memory facts', 'Session briefs']
-const KEYS = ['name', 'description', 'instructions', 'skills', 'routines', 'memory_facts', 'session_briefs']
+const LABELS = ['Name', 'Description', 'Instructions', 'Skills', 'Routines', 'Memory facts', 'Session briefs', 'Conversations (full)']
+const KEYS = ['name', 'description', 'instructions', 'skills', 'routines', 'memory_facts', 'session_briefs', 'transcripts']
 const WAYS = ['grok_to_hermes', 'hermes_to_grok', 'both', 'off']
 const WAY_WORDS = ['Grok → Hermes', 'Hermes → Grok', 'Both ways', 'Off']
 const MIRROR_WHY = 'Needs the Mirror, with your permission to change this bot.'
@@ -254,13 +254,14 @@ const acmeItems = (over = {}) => [
   item('skills', { choices: choices([['not_yet', SKILLS_WHY], ['not_yet', SKILLS_WHY], ['ok'], ['not_yet', SKILLS_WHY]]), direction: 'both', last_direction: 'hermes_to_grok', last_synced_at: AT, sentence: BOTH, ...over.skills }),
   item('routines', { choices: choices([['not_yet', NOT_YET_WHY], ['not_yet', NOT_YET_WHY], ['not_yet', NOT_YET_WHY], ['ok']]), direction: 'off', sentence: OFF, state: 'not_yet' }),
   privateItem('memory_facts'),
-  privateItem('session_briefs')
+  privateItem('session_briefs'),
+  privateItem('transcripts')
 ]
 const acme = (over = {}) => ({ id: ACME, items: acmeItems(over), mirror: 'not_set_up', name: 'Acme Support' })
 const READ_FAILED = 'Could not read when the instructions of Recipe Planner last arrived.'
 const recipe = {
   id: RECIPE,
-  items: KEYS.map(k => (['memory_facts', 'session_briefs'].includes(k) ? privateItem(k) : k === 'instructions' ? item(k, { error: { code: 'read_failed', message: READ_FAILED }, state: 'error' }) : item(k))),
+  items: KEYS.map(k => (['memory_facts', 'session_briefs', 'transcripts'].includes(k) ? privateItem(k) : k === 'instructions' ? item(k, { error: { code: 'read_failed', message: READ_FAILED }, state: 'error' }) : item(k))),
   mirror: 'ready',
   name: 'Recipe Planner'
 }
@@ -290,20 +291,20 @@ ok(P.syncPanelOf({ ...base, schema: 'other' }) === null && P.syncPanelOf(null) =
 ok(render(base, { pair: pairOf('someone-else') }) === '' && render(panel([])) === '', 'a twin the answer does not know: no fold')
 ok(render(base, { pair: pairOf(ACME, { sample: true }) }) === '' && H.queries[0].enabled === false, 'the sample: no fold, and no read')
 
-// ── 5. the seven rows ───────────────────────────────────────────────────────
+// ── 5. the eight rows ───────────────────────────────────────────────────────
 
 html = render(base)
 const headings = [...markup.matchAll(/<h3[^>]*>([^<]*)<\/h3>/g)].map(m => m[1])
-ok(JSON.stringify(headings) === JSON.stringify(LABELS), `all seven things, in order, each a heading (${JSON.stringify(headings)})`)
-ok(H.options.length === 28 && KEYS.every(k => JSON.stringify(optionsOf(k).map(o => o.choice.direction)) === JSON.stringify(WAYS)), 'four ways for each, always in the same order')
+ok(JSON.stringify(headings) === JSON.stringify(LABELS), `all eight things, in order, each a heading (${JSON.stringify(headings)})`)
+ok(H.options.length === 32 && KEYS.every(k => JSON.stringify(optionsOf(k).map(o => o.choice.direction)) === JSON.stringify(WAYS)), 'four ways for each, always in the same order')
 ok(WAY_WORDS.every((w, i) => KEYS.every(k => markup.includes(`id="gbt-sync-${k}-${WAYS[i]}"`) && new RegExp(`for="gbt-sync-${k}-${WAYS[i]}"[^>]*><input[^>]*>${w}</label>`).test(markup))), 'each way is a radio button inside its own label, with its words')
 // a radio group per row, named for the eye and the ear
 const groups = [...markup.matchAll(/role="radiogroup"/g)].length
-ok(groups === 7 && markup.includes('aria-label="Instructions for Acme Support: which way it syncs"') && markup.includes('aria-label="Session briefs for Acme Support: which way it syncs"'), `one radio group per row, each with a spoken name (${groups})`)
-ok((markup.match(/<input[^>]*type="radio"[^>]*>/g) ?? []).length === 28 && KEYS.every(k => (markup.match(new RegExp(`name="gbt-sync-${k}"`, 'g')) ?? []).length === 4), 'native radio buttons under one name per row: Tab reaches the group, the arrow keys move in it')
+ok(groups === 8 && markup.includes('aria-label="Instructions for Acme Support: which way it syncs"') && markup.includes('aria-label="Conversations (full) for Acme Support: which way it syncs"'), `one radio group per row, each with a spoken name (${groups})`)
+ok((markup.match(/<input[^>]*type="radio"[^>]*>/g) ?? []).length === 32 && KEYS.every(k => (markup.match(new RegExp(`name="gbt-sync-${k}"`, 'g')) ?? []).length === 4), 'native radio buttons under one name per row: Tab reaches the group, the arrow keys move in it')
 // the never-ahead rule: checked is what the backend last said
-ok(KEYS.every(k => optionsOf(k).filter(o => o.checked).length === 1) && option('name', 'grok_to_hermes').checked && option('skills', 'both').checked && option('routines', 'off').checked && option('session_briefs', 'off').checked, 'checked: the way the backend says is in effect, one per row')
-ok((markup.match(/<input[^>]*checked=""[^>]*>/g) ?? []).length === 7, 'the markup has seven checked radios')
+ok(KEYS.every(k => optionsOf(k).filter(o => o.checked).length === 1) && option('name', 'grok_to_hermes').checked && option('skills', 'both').checked && option('routines', 'off').checked && option('transcripts', 'off').checked, 'checked: the way the backend says is in effect, one per row')
+ok((markup.match(/<input[^>]*checked=""[^>]*>/g) ?? []).length === 8, 'the markup has eight checked radios')
 // a way that cannot be chosen is switched off, and why is said in words under the group
 ok(option('name', 'hermes_to_grok').disabled && option('name', 'both').disabled && !option('name', 'off').disabled && !option('name', 'grok_to_hermes').disabled, 'Name: the two ways back wait for the Mirror; Off can be chosen')
 ok(option('routines', 'grok_to_hermes').disabled && option('memory_facts', 'both').disabled && !option('memory_facts', 'off').disabled, 'not in this version: switched off')
@@ -320,7 +321,7 @@ ok((markup.match(/<span class="shrink-0 rounded-\[3px\][^"]*">Needs the Mirror<\
   ok((offMarkup.match(/<span class="shrink-0 rounded-\[3px\][^"]*">Needs the Mirror<\/span>/g) ?? []).length === 1 && /Needs the Mirror/.test(offHtml), 'Needs the Mirror: a small tag on a row where nothing moves until the Mirror is there')
   html = render(base)
 }
-ok((markup.match(/<span class="shrink-0 rounded-\[3px\][^"]*">Not in this version yet<\/span>/g) ?? []).length === 3, 'Not in this version yet: a tag on routines and the two private rows')
+ok((markup.match(/<span class="shrink-0 rounded-\[3px\][^"]*">Not in this version yet<\/span>/g) ?? []).length === 4, 'Not in this version yet: a tag on routines and the three private rows')
 // the Mirror, once for the panel
 ok(button('Skill sync…').length === 1 && (html.match(new RegExp(MIRROR_SENTENCE.replace(/[.:]/g, '.'), 'g')) ?? []).length === 1 && button('Skill sync…')[0].describedBy === 'gbt-sync-mirror' && button('Skill sync…')[0].variant === 'secondary', `the Mirror: one sentence and one button for the whole panel (${JSON.stringify(H.buttons.map(b => b.text))})`)
 {
@@ -336,7 +337,7 @@ ok(!render(base, { pair: pairOf(RECIPE) }).includes(MIRROR_SENTENCE) && button('
 // when, and what the way in effect means
 html = render(base)
 ok(text(between('gbt-sync-name-label', 'gbt-sync-description-label')).includes('Last synced 3 min ago, Grok → Hermes') && text(between('gbt-sync-instructions-label', 'gbt-sync-skills-label')).includes('Last synced 3 min ago') && !text(between('gbt-sync-instructions-label', 'gbt-sync-skills-label')).includes('3 min ago,'), 'last synced: when, and which way when the backend says')
-ok(text(between('gbt-sync-skills-label', 'gbt-sync-routines-label')).includes('Last synced 3 min ago, Hermes → Grok') && text(between('gbt-sync-description-label', 'gbt-sync-instructions-label')).includes('Not synced yet') && (html.match(/Not synced yet/g) ?? []).length === 4, 'never synced: "Not synced yet"')
+ok(text(between('gbt-sync-skills-label', 'gbt-sync-routines-label')).includes('Last synced 3 min ago, Hermes → Grok') && text(between('gbt-sync-description-label', 'gbt-sync-instructions-label')).includes('Not synced yet') && (html.match(/Not synced yet/g) ?? []).length === 5, 'never synced: "Not synced yet"')
 ok(text(between('gbt-sync-name-label', 'gbt-sync-description-label')).includes(G2H) && text(between('gbt-sync-skills-label', 'gbt-sync-routines-label')).includes(BOTH) && text(between('gbt-sync-routines-label', 'gbt-sync-memory_facts-label')).includes(OFF), "the way in effect, in the backend's one sentence")
 ok(text(between('gbt-sync-description-label', 'gbt-sync-instructions-label')).includes('A change made on both sides is held until you choose.'), 'a note, when the backend has one')
 ok(markup.includes(`title="Choosing Both ways would do what it says."`), "each way's own sentence is its hover text (extra, never the only place a reason is)")
